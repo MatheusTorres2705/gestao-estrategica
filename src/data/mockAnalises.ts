@@ -1,0 +1,58 @@
+import type { Analise } from '@/types';
+
+export const mockAnalises: Analise[] = [
+  {
+    id: 'a001',
+    indicadorId: 'qualidade',
+    problema: 'Gate G3 Acabamento abaixo da meta (81%)',
+    responsavel: 'Gerente',
+    dataCriacao: '2026-04-28',
+    mes: 4,
+    ano: 2026,
+  },
+  {
+    id: 'a002',
+    indicadorId: 'qualidade',
+    problema: 'HxH Retrabalho 312h — meta 200h',
+    responsavel: 'Gerente',
+    dataCriacao: '2026-04-29',
+    mes: 4,
+    ano: 2026,
+  },
+  {
+    id: 'a003',
+    indicadorId: 'seguranca',
+    problema: '3 incidentes em abril — meta ≤ 2',
+    responsavel: 'Gerente',
+    dataCriacao: '2026-04-30',
+    mes: 4,
+    ano: 2026,
+  },
+  {
+    id: 'a004',
+    indicadorId: 'producao',
+    problema: 'OPE abaixo da meta — 78% vs 85%',
+    responsavel: 'Gerente',
+    dataCriacao: '2026-04-25',
+    mes: 4,
+    ano: 2026,
+  },
+  {
+    id: 'a005',
+    indicadorId: 'tarifa-horaria',
+    problema: 'Tarifa Horária R$182/h — meta R$175/h',
+    responsavel: 'Gerente',
+    dataCriacao: '2026-04-27',
+    mes: 4,
+    ano: 2026,
+  },
+  {
+    id: 'a006',
+    indicadorId: 'pcm',
+    problema: '23 itens faltantes para Maio',
+    responsavel: 'Gerente',
+    dataCriacao: '2026-05-02',
+    mes: 5,
+    ano: 2026,
+  },
+];
