@@ -812,10 +812,69 @@ const _LINHAS_MENORES_ARR = ['NX410','NX440','NX500','NX620','NX62'];
 const _SETORES_SQL = ['ACAB','MONT','MARC','ELET','LAM','REB'];
 const _OPE_META_PCT = 85;
 
-type _RawAtivRow  = { linha: string; data: string; setorMacro: string; horas: number; qtdAtiv: number };
-type _RawPontoRow = { linha: string; data: string; setorMacro: string; qtdPonto: number; horasPonto: number };
-type _AggRow      = { label: string; horas: number; horasReg: number; qtdAtiv: number; qtdPonto: number };
-type _KpiStatus   = 'ok' | 'atencao' | 'critico';
+type _RawAtivRow    = { linha: string; data: string; setorMacro: string; horas: number; qtdAtiv: number };
+type _RawPontoRow   = { linha: string; data: string; setorMacro: string; qtdPonto: number; horasPonto: number };
+type _AggRow        = { label: string; horas: number; horasReg: number; qtdAtiv: number; qtdPonto: number };
+type _KpiStatus     = 'ok' | 'atencao' | 'critico';
+type _RawBarcoRow   = { chassi: string; linha: string; mes: number; ano: number; pctConclu: number };
+
+function _buildSqlBarcosEntregues(mes: number, ano: number): string {
+  return `
+WITH
+TAB_APO AS (
+  SELECT APO.*
+  FROM AD_CRONOGRAMA CRO
+    LEFT JOIN AD_DETALCRONOGRAMA DET ON DET.SEQ = CRO.SEQ
+    LEFT JOIN AD_APOAVANCO APO ON (APO.SEQ = DET.SEQ AND APO.CODUSU = DET.CODUSU)
+    LEFT JOIN TGFPRO PRO ON APO.CODPRODSP = PRO.CODPROD
+    INNER JOIN TCSPRJ PRJ ON PRJ.CODPROJ = CRO.CODPROJ
+    INNER JOIN TSIUSU USU ON USU.CODUSU = APO.CODUSU
+  WHERE APO.DATA > TO_DATE('01/01/${ano - 1}', 'DD/MM/YYYY')
+    AND SUBSTR(PRJ.IDENTIFICACAO, 1, 5) IN (
+      'NX260','NX270','NX280','NX290','NX310',
+      'NX340','NX350','NX360','NX370','NX410','NX440','NX500','NX620','NX62'
+    )
+),
+TAB_ATIVIDADES AS (
+  SELECT
+    COMP.SEQ          AS COD_SEQUENCIAL,
+    CRO.MES,
+    CRO.ANO,
+    SUBSTR(PRJ.IDENTIFICACAO, 1, 5) AS LINHA,
+    PRJ.IDENTIFICACAO AS CHASSI,
+    COMP.QTD          AS DURACAO,
+    COMP.FEITO        AS STATUS
+  FROM AD_COMPONENTECRONO COMP
+    LEFT JOIN TAB_APO APO
+      ON APO.SEQ = COMP.SEQ AND APO.CODUSU = COMP.CODUSU AND APO.CODPRODSP = COMP.CODPRODSP
+    LEFT JOIN AD_CRONOGRAMA CRO ON CRO.SEQ      = COMP.SEQ
+    LEFT JOIN TCSPRJ PRJ        ON PRJ.CODPROJ  = CRO.CODPROJ
+  WHERE COMP.RETRABALHO IS NULL
+    AND CRO.ANO * 100 + CRO.MES >= ${ano * 100 + mes}
+),
+DETAVANCO AS (
+  SELECT
+    COD_SEQUENCIAL, CHASSI, LINHA, MES, ANO,
+    SUM(CASE WHEN STATUS = 'S' THEN DURACAO ELSE 0 END) AS DURACAO_CONCLU,
+    SUM(DURACAO) AS DURACAO_TOT
+  FROM TAB_ATIVIDADES
+  GROUP BY COD_SEQUENCIAL, CHASSI, LINHA, MES, ANO
+)
+SELECT
+  COD_SEQUENCIAL,
+  CHASSI,
+  LINHA,
+  MES,
+  ANO,
+  CASE WHEN SUM(DURACAO_TOT) > 0
+    THEN ROUND(SUM(DURACAO_CONCLU) / SUM(DURACAO_TOT) * 100, 2)
+    ELSE 0
+  END AS PCT_CONCLU
+FROM DETAVANCO
+GROUP BY COD_SEQUENCIAL, CHASSI, LINHA, MES, ANO
+ORDER BY LINHA, CHASSI
+`.trim();
+}
 
 function _oracleInicio(s: string) { return `TO_DATE('${s} 00:00:00', 'DD/MM/YYYY HH24:MI:SS')`; }
 function _oracleFim(s: string)    { return `TO_DATE('${s} 23:59:59', 'DD/MM/YYYY HH24:MI:SS')`; }
@@ -1197,6 +1256,9 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
+  const [dadosBarcos, setDadosBarcos]     = useState<_RawBarcoRow[]>([]);
+  const [loadingBarcos, setLoadingBarcos] = useState(false);
+
   const [galpoesSel, setGalpoesSel] = useState<string[]>([]);
   const [setoresSel, setSetoresSel] = useState<string[]>([]);
 
@@ -1228,6 +1290,37 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
       .catch((e) => setErro(`Falha ao carregar dados de OPE: ${e?.message ?? 'erro desconhecido'}`))
       .finally(() => setLoading(false));
   }, [periodoIni, periodoFim]);
+
+  useEffect(() => {
+    setLoadingBarcos(true);
+    obterReg<Record<string, any>>(_buildSqlBarcosEntregues(mes, ano))
+      .then(rows => setDadosBarcos(rows.map(r => ({
+        chassi:    String(r['CHASSI']     ?? r['chassi']     ?? ''),
+        linha:     String(r['LINHA']      ?? r['linha']      ?? ''),
+        mes:       Number(r['MES']        ?? r['mes']        ?? 0),
+        ano:       Number(r['ANO']        ?? r['ano']        ?? 0),
+        pctConclu: Number(r['PCT_CONCLU'] ?? r['pct_conclu'] ?? 0),
+      }))))
+      .finally(() => setLoadingBarcos(false));
+  }, [mes, ano]);
+
+  const aderenciaKpi = useMemo(() => {
+    const totBarcos    = dadosBarcos.filter(r => r.mes === mes && r.ano === ano).length;
+    const totEntregues = dadosBarcos.reduce((s, r) => s + r.pctConclu / 100, 0);
+    if (totBarcos === 0) return null;
+    const pct  = totEntregues / totBarcos * 100;
+    const meta = 95;
+    const diff = pct - meta;
+    const status: _KpiStatus =
+      pct >= meta      ? 'ok' :
+      pct >= meta - 10 ? 'atencao' : 'critico';
+    return {
+      valor:   `${pct.toFixed(1).replace('.', ',')}%`,
+      status,
+      delta:   `${Math.abs(diff).toFixed(1).replace('.', ',')}p.p.`,
+      deltaUp: diff > 0,
+    };
+  }, [dadosBarcos, mes, ano]);
 
   const ope = useMemo(() => _agregarOpe(dadosAtiv, dadosPonto), [dadosAtiv, dadosPonto]);
 
@@ -1287,7 +1380,7 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
           deltaUp={opeKpi?.deltaUp ?? false}
           loading={loading}
         />
-        <_KpiCard titulo="Aderência de Entrega de Embarcações" valor={null} meta="95%"    status="atencao" delta="" deltaUp={false} />
+        <_KpiCard titulo="Aderência de Entrega de Embarcações" valor={aderenciaKpi?.valor ?? null} meta="95%" status={aderenciaKpi?.status ?? 'atencao'} delta={aderenciaKpi?.delta ?? ''} deltaUp={aderenciaKpi?.deltaUp ?? false} loading={loadingBarcos} />
         <_KpiCard titulo="Absenteísmo"                         valor={null} meta="3%"     status="atencao" delta="" deltaUp={false} />
         <_KpiCard titulo="Horas Extras"                        valor={null} meta="300 h"  status="atencao" delta="" deltaUp={false} />
       </div>
