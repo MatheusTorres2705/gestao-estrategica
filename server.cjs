@@ -60,7 +60,39 @@ async function sankhyaQuery(jsessionid, sql) {
     headers: { Cookie: `JSESSIONID=${jsessionid}` }
   });
   if (r.status >= 400) throw new Error(`Falha HTTP ${r.status} na query`);
-  return r.data?.responseBody?.rows || [];
+
+  const body = r.data?.responseBody || {};
+  const rawRows = body.rows || [];
+
+  if (rawRows.length === 0) return [];
+
+  // Log de diagnóstico do formato (apenas na primeira chamada de um novo formato)
+  const sampleKey = Array.isArray(rawRows[0]) ? 'array' : typeof rawRows[0];
+  if (!sankhyaQuery._loggedFmt) {
+    sankhyaQuery._loggedFmt = new Set();
+  }
+  if (!sankhyaQuery._loggedFmt.has(sampleKey)) {
+    sankhyaQuery._loggedFmt.add(sampleKey);
+    console.log('[sankhya] formato de row:', sampleKey, '| amostra:', JSON.stringify(rawRows[0]).slice(0, 120));
+    const metaKeys = Object.keys(body).filter(k => k !== 'rows');
+    if (metaKeys.length) console.log('[sankhya] chaves extras no responseBody:', metaKeys);
+  }
+
+  // Caso 1: rows são objetos com chaves nomeadas — retorna direto
+  if (!Array.isArray(rawRows[0])) return rawRows;
+
+  // Caso 2: rows são arrays + fieldsMetaData disponível — converte para objetos
+  const fields = body.fieldsMetaData || body.columns || [];
+  if (fields.length > 0) {
+    return rawRows.map(row => {
+      const obj = {};
+      fields.forEach((f, i) => { obj[typeof f === 'string' ? f : f.name] = row[i]; });
+      return obj;
+    });
+  }
+
+  // Caso 3: rows são arrays sem metadados — retorna como está (tratado no frontend)
+  return rawRows;
 }
 
 async function sankhyaSave(jsessionid, entity, fields) {
@@ -123,7 +155,10 @@ app.post('/api/auth/login', async (req, res) => {
     const jsessionid = await sankhyaLogin(usuarioUpper, senha);
     const sqlUser = `SELECT CODUSU, NVL(CODVEND,0) AS CODVEND, NOMEUSU FROM TSIUSU WHERE UPPER(NOMEUSU) = '${safeUser}'`;
     const rows = await sankhyaQuery(jsessionid, sqlUser);
-    const [codusu, codvend, nomeusu] = rows[0] || [];
+    const row = rows[0] || {};
+    const codusu  = Array.isArray(row) ? row[0] : (row.CODUSU  ?? row.codusu  ?? null);
+    const codvend = Array.isArray(row) ? row[1] : (row.CODVEND ?? row.codvend ?? null);
+    const nomeusu = Array.isArray(row) ? row[2] : (row.NOMEUSU ?? row.nomeusu ?? null);
     const name = nomeusu || usuarioUpper;
     const jti = uuidv4();
     sessions[jti] = { jsessionid, usuario: usuarioUpper, codusu: codusu ?? null, codvend: codvend ?? null, name, createdAt: new Date().toISOString() };

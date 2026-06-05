@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useOutletContext, useNavigate, Link } from 'react-router-dom';
 import {
   ChevronLeft, Plus, TrendingUp, TrendingDown, Minus,
@@ -13,6 +13,7 @@ import { fmtPeriodo } from '@/lib/formatters';
 import { CausaEfeitoModal } from '@/pages/CausaEfeitoModal';
 import { Button } from '@/components/ui/button';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { obterReg } from '@/lib/obterReg';
 import { cn } from '@/lib/utils';
 
 type OutletCtx = { mes: number; ano: number };
@@ -148,7 +149,7 @@ export default function IndicadorPage() {
       {indicador.id === 'seguranca' && indicador.detalheExtra && <SegurancaDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'moldes' && indicador.detalheExtra && <MoldesDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'pcm' && indicador.detalheExtra && <PcmDetalhe detalhe={indicador.detalheExtra} />}
-      {indicador.id === 'producao' && indicador.detalheExtra && <ProducaoDetalhe detalhe={indicador.detalheExtra} />}
+      {indicador.id === 'producao' && <ProducaoDetalhe mes={mes} ano={ano} />}
 
       {/* Causas */}
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -401,27 +402,305 @@ function PcmDetalhe({ detalhe }: { detalhe: Record<string, unknown> }) {
   );
 }
 
-function ProducaoDetalhe({ detalhe }: { detalhe: Record<string, unknown> }) {
-  const galpoes = detalhe.aderenciaPorGalpao as Array<{ galpao: string; previsto: number; realizado: number; percentual: number }> ?? [];
+/* ── Produção: OPE por Galpão ─────────────────────────────── */
+
+const _LINHAS_MAIORES = new Set(['NX260','NX270','NX280','NX290','NX310','NX340','NX350','NX360','NX370']);
+const _LINHAS_GALP2   = new Set(['NX410','NX440']);
+const _LINHAS_GALP3   = new Set(['NX500','NX620']);
+const _LINHAS_MAIORES_ARR = ['NX260','NX270','NX280','NX290','NX310','NX340','NX350','NX360','NX370'];
+const _LINHAS_MENORES_ARR = ['NX410','NX440','NX500','NX620','NX62'];
+const _SETORES_SQL = ['ACAB','MONT','MARC','ELET','LAM','REB'];
+const _OPE_META_PCT = 85;
+
+type _RawAtivRow  = { linha: string; data: string; setorMacro: string; horas: number; qtdAtiv: number };
+type _RawPontoRow = { linha: string; data: string; setorMacro: string; qtdPonto: number; horasPonto: number };
+type _AggRow      = { label: string; horas: number; horasReg: number; qtdAtiv: number; qtdPonto: number };
+type _KpiStatus   = 'ok' | 'atencao' | 'critico';
+
+function _oracleInicio(s: string) { return `TO_DATE('${s} 00:00:00', 'DD/MM/YYYY HH24:MI:SS')`; }
+function _oracleFim(s: string)    { return `TO_DATE('${s} 23:59:59', 'DD/MM/YYYY HH24:MI:SS')`; }
+function _oracleData(s: string)   { return `TO_DATE('${s}', 'DD/MM/YYYY')`; }
+
+function _buildSqlAtividades(ini: string, fim: string, linhasArr: string[], setor: string): string {
+  const linhasIn = linhasArr.map(l => `'${l}'`).join(',');
+  return `
+WITH
+TAB_APO AS (
+  SELECT APO.*
+  FROM AD_CRONOGRAMA CRO
+    LEFT JOIN AD_DETALCRONOGRAMA DET ON DET.SEQ = CRO.SEQ
+    LEFT JOIN AD_APOAVANCO APO ON (APO.SEQ = DET.SEQ AND APO.CODUSU = DET.CODUSU)
+    LEFT JOIN TGFPRO PRO ON APO.CODPRODSP = PRO.CODPROD
+    INNER JOIN TCSPRJ PRJ ON PRJ.CODPROJ = CRO.CODPROJ
+    INNER JOIN TSIUSU USU ON USU.CODUSU = APO.CODUSU
+  WHERE APO.DATA BETWEEN ${_oracleInicio(ini)} AND ${_oracleFim(fim)}
+    AND SUBSTR(PRJ.IDENTIFICACAO, 1, 5) IN (${linhasIn})
+),
+TAB_DEP AS (
+  SELECT DISTINCT
+    DEP.AD_CODUSU, DEP.CODDEP, DEP.DESCRDEP, DEPL.CODPROJPAI
+  FROM TFPDEP DEP
+    LEFT JOIN AD_DEPLINHA DEPL ON DEPL.CODDEP = DEP.CODDEP
+  WHERE DEP.AD_CODUSU IS NOT NULL
+),
+TAB_BASE AS (
+  SELECT
+    COMP.SEQ                        AS COD_SEQUENCIAL,
+    PRJ.CODPROJPAI,
+    TAB_DEP.CODDEP,
+    TAB_DEP.DESCRDEP,
+    SUBSTR(PRJ.IDENTIFICACAO, 1, 5) AS LINHA,
+    PRJ.IDENTIFICACAO               AS CHASSI,
+    COMP.CODUSU                     AS COD_SETOR,
+    USU.NOMEUSU                     AS SETOR,
+    COMP.CODPRODSP                  AS COD_ATIVIDADE,
+    PRO.DESCRPROD                   AS ATIVIDADE,
+    COMP.QTD                        AS DURACAO,
+    COMP.FEITO                      AS STATUS,
+    APO.DATA                        AS DATA_EXECUCAO,
+    ROW_NUMBER() OVER (
+      PARTITION BY
+        COMP.SEQ, PRJ.CODPROJPAI, SUBSTR(PRJ.IDENTIFICACAO, 1, 5), PRJ.IDENTIFICACAO,
+        COMP.CODUSU, USU.NOMEUSU, COMP.CODPRODSP, PRO.DESCRPROD, COMP.QTD, COMP.FEITO, APO.DATA
+      ORDER BY
+        (SELECT COUNT(*) FROM AD_DEPLINHA X WHERE X.CODDEP = TAB_DEP.CODDEP) ASC,
+        TAB_DEP.CODDEP ASC
+    ) AS RN
+  FROM AD_COMPONENTECRONO COMP
+    LEFT JOIN TAB_APO APO
+      ON APO.SEQ = COMP.SEQ AND APO.CODUSU = COMP.CODUSU AND APO.CODPRODSP = COMP.CODPRODSP
+    LEFT JOIN TGFPRO PRO        ON PRO.CODPROD  = COMP.CODPRODSP
+    LEFT JOIN TSIUSU USU        ON USU.CODUSU   = COMP.CODUSU
+    LEFT JOIN AD_CRONOGRAMA CRO ON CRO.SEQ      = COMP.SEQ
+    LEFT JOIN TCSPRJ PRJ        ON PRJ.CODPROJ  = CRO.CODPROJ
+    LEFT JOIN TAB_DEP
+      ON TAB_DEP.AD_CODUSU  = COMP.CODUSU
+     AND TAB_DEP.CODPROJPAI = PRJ.CODPROJPAI
+  WHERE COMP.RETRABALHO IS NULL
+    AND APO.DATA IS NOT NULL
+),
+SETOR_MACRO AS (
+  SELECT DISTINCT DEP.AD_CODUSU, DEPL.SETORMACRO
+  FROM TFPDEP DEP
+    JOIN AD_DEPLINHA DEPL ON DEPL.CODDEP = DEP.CODDEP
+  WHERE DEP.AD_CODUSU IS NOT NULL
+    AND DEPL.SETORMACRO IS NOT NULL
+)
+SELECT
+  TB.LINHA,
+  TO_CHAR(TB.DATA_EXECUCAO, 'DD/MM/YYYY') AS DATA,
+  SM.SETORMACRO,
+  COUNT(*)                        AS QTD_REGISTROS,
+  ROUND(SUM(TB.DURACAO) / 60, 2) AS HORAS
+FROM TAB_BASE TB
+  JOIN SETOR_MACRO SM ON SM.AD_CODUSU = TB.COD_SETOR
+WHERE TB.RN = 1
+  AND SM.SETORMACRO = '${setor}'
+GROUP BY TB.LINHA, TB.DATA_EXECUCAO, SM.SETORMACRO
+ORDER BY TB.LINHA, TB.DATA_EXECUCAO, SM.SETORMACRO
+`.trim();
+}
+
+function _buildSqlPonto(ini: string, fim: string, linhasArr: string[], setor: string): string {
+  const linhasIn = linhasArr.map(l => `'${l}'`).join(',');
+  return `
+SELECT LINHA, DATA, SETORMACRO,
+  COUNT(*)      AS QTD_REGISTROS,
+  COUNT(*) * 8  AS HORAS_PONTO
+FROM (
+  SELECT DISTINCT
+    PON.CODFUNC,
+    TO_CHAR(PON.DTPONTO, 'DD/MM/YYYY') AS DATA,
+    'NX' || CASE SUBSTR(DEPL.CODPROJPAI, 3, 3)
+                 WHEN '480' THEN '500'
+                 ELSE SUBSTR(DEPL.CODPROJPAI, 3, 3)
+            END  AS LINHA,
+    DEPL.SETORMACRO
+  FROM AD_BATPONTO PON
+    JOIN TFPEQP EQ        ON EQ.CODEQP   = PON.CODEQP
+    JOIN TFPFUN FUN       ON FUN.CODFUNC = PON.CODFUNC
+    JOIN AD_DEPLINHA DEPL ON DEPL.CODDEP = FUN.CODDEP
+  WHERE PON.DTPONTO BETWEEN ${_oracleData(ini)} AND ${_oracleData(fim)}
+    AND EQ.AD_USADO     = '1'
+    AND DEPL.SETORMACRO = '${setor}'
+    AND DEPL.CODPROJPAI IS NOT NULL
+)
+WHERE LINHA IN (${linhasIn})
+GROUP BY LINHA, DATA, SETORMACRO
+ORDER BY LINHA, DATA, SETORMACRO
+`.trim();
+}
+
+// Sankhya pode retornar array [LINHA, DATA, SETORMACRO, QTD_REGISTROS, HORAS]
+// ou objeto com chaves nomeadas — ambos são suportados
+function _mapAtiv(r: unknown): _RawAtivRow {
+  if (Array.isArray(r)) {
+    return { linha: String(r[0] ?? ''), data: String(r[1] ?? ''), setorMacro: String(r[2] ?? ''), qtdAtiv: Number(r[3] ?? 0), horas: Number(r[4] ?? 0) };
+  }
+  const o = r as Record<string, unknown>;
+  return {
+    linha:      String(o['LINHA']         ?? o['linha']         ?? ''),
+    data:       String(o['DATA']          ?? o['data']          ?? ''),
+    setorMacro: String(o['SETORMACRO']    ?? o['setormacro']    ?? ''),
+    horas:      Number(o['HORAS']         ?? o['horas']         ?? 0),
+    qtdAtiv:    Number(o['QTD_REGISTROS'] ?? o['qtd_registros'] ?? 0),
+  };
+}
+
+// Sankhya pode retornar array [LINHA, DATA, SETORMACRO, QTD_REGISTROS, HORAS_PONTO]
+// ou objeto com chaves nomeadas — ambos são suportados
+function _mapPonto(r: unknown): _RawPontoRow {
+  if (Array.isArray(r)) {
+    return { linha: String(r[0] ?? ''), data: String(r[1] ?? ''), setorMacro: String(r[2] ?? ''), qtdPonto: Number(r[3] ?? 0), horasPonto: Number(r[4] ?? 0) };
+  }
+  const o = r as Record<string, unknown>;
+  return {
+    linha:      String(o['LINHA']         ?? o['linha']         ?? ''),
+    data:       String(o['DATA']          ?? o['data']          ?? ''),
+    setorMacro: String(o['SETORMACRO']    ?? o['setormacro']    ?? ''),
+    qtdPonto:   Number(o['QTD_REGISTROS'] ?? o['qtd_registros'] ?? 0),
+    horasPonto: Number(o['HORAS_PONTO']   ?? o['horas_ponto']   ?? 0),
+  };
+}
+
+function _agregarOpe(ativos: _RawAtivRow[], pontos: _RawPontoRow[]): _AggRow[] {
+  const grupos = [
+    { label: 'Geral',    fn: (_: string) => true },
+    { label: 'Galpão 1', fn: (l: string) => _LINHAS_MAIORES.has(l) },
+    { label: 'Galpão 2', fn: (l: string) => _LINHAS_GALP2.has(l) },
+    { label: 'Galpão 3', fn: (l: string) => _LINHAS_GALP3.has(l) },
+  ];
+  return grupos.map(({ label, fn }) => ({
+    label,
+    horas:    ativos.filter(r => fn(r.linha)).reduce((s, r) => s + r.horas,      0),
+    horasReg: pontos.filter(r => fn(r.linha)).reduce((s, r) => s + r.horasPonto, 0),
+    qtdAtiv:  ativos.filter(r => fn(r.linha)).reduce((s, r) => s + r.qtdAtiv,    0),
+    qtdPonto: pontos.filter(r => fn(r.linha)).reduce((s, r) => s + r.qtdPonto,   0),
+  }));
+}
+
+function _OpeGalpaoCard({ rows, loading = false }: { rows: _AggRow[]; loading?: boolean }) {
+  const barColor = (s: _KpiStatus) =>
+    s === 'ok' ? 'bg-emerald-500' : s === 'atencao' ? 'bg-amber-400' : 'bg-rose-500';
+  const textColor = (s: _KpiStatus) =>
+    s === 'ok' ? 'text-emerald-600' : s === 'atencao' ? 'text-amber-600' : 'text-rose-500';
+  const statusOpe = (pct: number): _KpiStatus =>
+    pct >= _OPE_META_PCT ? 'ok' : pct >= _OPE_META_PCT - 10 ? 'atencao' : 'critico';
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">Aderência por Galpão</h3>
-      <div className="space-y-3">
-        {galpoes.map((g) => (
-          <div key={g.galpao}>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-gray-600">{g.galpao}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400">{g.realizado}/{g.previsto}</span>
-                <span className={`text-xs font-semibold ${g.percentual >= 95 ? 'text-emerald-600' : g.percentual >= 80 ? 'text-amber-600' : 'text-red-600'}`}>{g.percentual.toFixed(0)}%</span>
-              </div>
-            </div>
-            <div className="h-2 rounded-full bg-gray-100">
-              <div className={`h-full rounded-full ${g.percentual >= 95 ? 'bg-emerald-500' : g.percentual >= 80 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${g.percentual}%` }} />
-            </div>
-          </div>
-        ))}
+    <div className="w-full rounded-2xl border border-slate-100 bg-white shadow-sm p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">OPE por Galpão</span>
+        <span className="text-[11px] text-slate-400 flex items-center gap-1">
+          <span className="opacity-40">◎</span> Meta: {_OPE_META_PCT}%
+        </span>
       </div>
+
+      {loading ? (
+        <div className="flex flex-col gap-3">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="w-20 h-3 rounded bg-slate-100 animate-pulse" />
+              <div className="flex-1 h-5 rounded-full bg-slate-100 animate-pulse" />
+              <span className="w-12 h-3 rounded bg-slate-100 animate-pulse" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {rows.map(row => {
+            const pct    = row.horasReg > 0 ? row.horas / row.horasReg * 100 : null;
+            const filled = pct !== null ? Math.min(pct, 100) : 0;
+            const status = pct !== null ? statusOpe(pct) : 'atencao';
+            const valStr = pct !== null ? `${pct.toFixed(1).replace('.', ',')}%` : '—';
+            const isGeral = row.label === 'Geral';
+
+            return (
+              <div key={row.label} className="flex items-center gap-3">
+                <span className={`w-20 shrink-0 text-[11px] text-right ${isGeral ? 'font-bold text-slate-700' : 'font-medium text-slate-500'}`}>
+                  {row.label}
+                </span>
+                <div className="relative flex-1 h-5 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${barColor(status)}`}
+                    style={{ width: `${filled}%` }}
+                  />
+                  <div
+                    className="absolute top-0 bottom-0 w-px bg-slate-400/60"
+                    style={{ left: `${_OPE_META_PCT}%` }}
+                  />
+                  <span
+                    className={`absolute inset-y-0 flex items-center text-[11px] font-bold tabular-nums transition-all duration-500 ${
+                      filled > 15 ? 'text-white right-auto' : `${textColor(status)} left-auto`
+                    }`}
+                    style={filled > 15 ? { left: `${filled - 2}%`, transform: 'translateX(-100%)' } : { left: `${filled + 2}%` }}
+                  >
+                    {valStr}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[10px] text-slate-400 w-8 text-right">100%</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
+}
+
+function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
+  const now = new Date();
+
+  const periodoIni = useMemo(() =>
+    `01/${String(mes).padStart(2, '0')}/${ano}`
+  , [mes, ano]);
+
+  const periodoFim = useMemo(() => {
+    const diasNoMes = new Date(ano, mes, 0).getDate();
+    const isMesAtual = mes === now.getMonth() + 1 && ano === now.getFullYear();
+    const ultimoDia  = isMesAtual ? now.getDate() : diasNoMes;
+    return `${String(ultimoDia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`;
+  }, [mes, ano]);
+
+  const [dadosAtiv,  setDadosAtiv]  = useState<_RawAtivRow[]>([]);
+  const [dadosPonto, setDadosPonto] = useState<_RawPontoRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setErro(null);
+    const queries = [_LINHAS_MAIORES_ARR, _LINHAS_MENORES_ARR].flatMap(linhas =>
+      _SETORES_SQL.flatMap(setor => [
+        obterReg(_buildSqlAtividades(periodoIni, periodoFim, linhas, setor)),
+        obterReg(_buildSqlPonto(periodoIni, periodoFim, linhas, setor)),
+      ])
+    );
+    Promise.all(queries)
+      .then(results => {
+        const ativos: _RawAtivRow[]  = [];
+        const pontos: _RawPontoRow[] = [];
+        for (let i = 0; i < results.length; i += 2) {
+          results[i].forEach(r => ativos.push(_mapAtiv(r)));
+          results[i + 1].forEach(r => pontos.push(_mapPonto(r)));
+        }
+        setDadosAtiv(ativos);
+        setDadosPonto(pontos);
+      })
+      .catch((e) => setErro(`Falha ao carregar dados de OPE: ${e?.message ?? 'erro desconhecido'}`))
+      .finally(() => setLoading(false));
+  }, [periodoIni, periodoFim]);
+
+  const ope = useMemo(() => _agregarOpe(dadosAtiv, dadosPonto), [dadosAtiv, dadosPonto]);
+
+  if (erro) {
+    return (
+      <div className="w-full rounded-2xl border border-slate-100 bg-white shadow-sm p-5">
+        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">OPE por Galpão</span>
+        <p className="mt-3 text-xs text-rose-500">{erro}</p>
+      </div>
+    );
+  }
+
+  return <_OpeGalpaoCard rows={ope} loading={loading} />;
 }
