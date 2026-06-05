@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     port: 3110,
     host: true,
-    allowedHosts: 'all',
+    allowedHosts: ['sankhya.nxboats.com.br'],
     proxy: {
       '/api': {
         target: 'https://sankhya.nxboats.com.br',
