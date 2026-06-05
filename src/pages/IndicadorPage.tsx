@@ -12,8 +12,13 @@ import { calcPctAtingimento, statusBscFromPct } from '@/types';
 import { fmtPeriodo } from '@/lib/formatters';
 import { CausaEfeitoModal } from '@/pages/CausaEfeitoModal';
 import { Button } from '@/components/ui/button';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import {
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
+  LineChart, Line, XAxis, YAxis, ReferenceLine,
+} from 'recharts';
 import { obterReg } from '@/lib/obterReg';
+import { getWorkingCapitalEstoque } from '@/services/workingCapitalService';
+import type { WorkingCapitalRow, Classificacao } from '@/services/workingCapitalService';
 import { cn } from '@/lib/utils';
 
 type OutletCtx = { mes: number; ano: number };
@@ -87,8 +92,8 @@ export default function IndicadorPage() {
         </div>
       </div>
 
-      {/* Métricas */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Métricas — ocultas em Produção (substituídas pelos KPI cards do OPE) */}
+      {indicador.id !== 'producao' && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {indicador.metricas.map((m) => {
           const isNum = typeof m.valor === 'number' && typeof m.meta === 'number';
           const pct = isNum
@@ -130,22 +135,24 @@ export default function IndicadorPage() {
             </div>
           );
         })}
-      </div>
+      </div>}
 
-      {/* Gráfico de tendência */}
-      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4">Evolução — Últimos 6 Meses</h3>
-        <TrendChart
-          data={indicador.tendencia}
-          height={220}
-          unit={indicador.metricas[0]?.unidade === '%' ? '%' : ''}
-        />
-      </div>
+      {/* Gráfico de tendência — substituído pelo OPE diário em Produção */}
+      {indicador.id !== 'producao' && (
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-gray-700 mb-4">Evolução — Últimos 6 Meses</h3>
+          <TrendChart
+            data={indicador.tendencia}
+            height={220}
+            unit={indicador.metricas[0]?.unidade === '%' ? '%' : ''}
+          />
+        </div>
+      )}
 
       {/* Conteúdo específico por indicador */}
       {indicador.id === 'qualidade' && indicador.detalheExtra && <QualidadeDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'tarifa-horaria' && indicador.detalheExtra && <TarifaDetalhe detalhe={indicador.detalheExtra} />}
-      {indicador.id === 'working-capital' && indicador.subIndicadores && <WorkingCapitalDetalhe subIndicadores={indicador.subIndicadores} />}
+      {indicador.id === 'working-capital' && <WorkingCapitalDetalhe />}
       {indicador.id === 'seguranca' && indicador.detalheExtra && <SegurancaDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'moldes' && indicador.detalheExtra && <MoldesDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'pcm' && indicador.detalheExtra && <PcmDetalhe detalhe={indicador.detalheExtra} />}
@@ -306,32 +313,232 @@ function TarifaDetalhe({ detalhe }: { detalhe: Record<string, unknown> }) {
   );
 }
 
-function WorkingCapitalDetalhe({ subIndicadores }: { subIndicadores: Array<{ label: string; valor: number | string; unidade?: string; cor?: string }> }) {
-  const data = subIndicadores.map((s) => ({ name: s.label, value: typeof s.valor === 'number' ? s.valor : 0, color: s.cor ?? '#2563EB' }));
+const WC_CFG: Record<Classificacao, { label: string; cor: string; bg: string; text: string; border: string }> = {
+  'NORMAL':      { label: 'Normal',      cor: '#16A34A', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+  'UNDER':       { label: 'Under',       cor: '#2563EB', bg: 'bg-blue-50',    text: 'text-blue-700',   border: 'border-blue-200'    },
+  'OVER':        { label: 'Over',        cor: '#D97706', bg: 'bg-amber-50',   text: 'text-amber-700',  border: 'border-amber-200'   },
+  'SLOW MOVING': { label: 'Slow Moving', cor: '#7C3AED', bg: 'bg-violet-50',  text: 'text-violet-700', border: 'border-violet-200'  },
+  'OBSOLETO':    { label: 'Obsoleto',    cor: '#DC2626', bg: 'bg-red-50',     text: 'text-red-700',    border: 'border-red-200'     },
+};
+
+const WC_ORDER: Classificacao[] = ['NORMAL', 'UNDER', 'OVER', 'SLOW MOVING', 'OBSOLETO'];
+
+function fmtBRL(v: number) {
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+}
+
+function fmtQtd(v: number) {
+  return v.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+}
+
+function WorkingCapitalDetalhe() {
+  const [rows, setRows] = useState<WorkingCapitalRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<Classificacao | null>(null);
+  const [pagina, setPagina] = useState(50);
+
+  useEffect(() => {
+    setLoading(true);
+    setErro(null);
+    getWorkingCapitalEstoque()
+      .then(setRows)
+      .catch((e: Error) => setErro(`Falha ao carregar estoque: ${e?.message ?? 'erro desconhecido'}`))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const sumario = useMemo(() => {
+    const totalCusto = rows.reduce((s, r) => s + r.custoTot, 0);
+    return WC_ORDER.map((cl) => {
+      const grupo = rows.filter((r) => r.classificacao === cl);
+      const custo = grupo.reduce((s, r) => s + r.custoTot, 0);
+      return {
+        classificacao: cl,
+        label: WC_CFG[cl].label,
+        cor: WC_CFG[cl].cor,
+        qtd: grupo.length,
+        custo,
+        pct: totalCusto > 0 ? (custo / totalCusto) * 100 : 0,
+      };
+    });
+  }, [rows]);
+
+  const pieData = useMemo(
+    () => sumario.map((s) => ({ name: s.label, value: parseFloat(s.pct.toFixed(1)), color: s.cor })),
+    [sumario],
+  );
+
+  const rowsFiltrados = useMemo(() => {
+    const base = filtro ? rows.filter((r) => r.classificacao === filtro) : rows;
+    return [...base].sort((a, b) => b.custoTot - a.custoTot);
+  }, [rows, filtro]);
+
+  const rowsVisiveis = rowsFiltrados.slice(0, pagina);
+
+  const btnFiltro = (cl: Classificacao | null) => {
+    const ativo = filtro === cl;
+    if (cl === null) {
+      return cn('px-3 py-1 rounded-full text-xs font-medium transition-colors', ativo ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200');
+    }
+    const cfg = WC_CFG[cl];
+    return cn('px-3 py-1 rounded-full text-xs font-medium transition-colors border', ativo ? `${cfg.bg} ${cfg.text} ${cfg.border}` : 'bg-gray-100 text-gray-500 border-transparent hover:bg-gray-200');
+  };
+
+  if (erro) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-5">
+        <p className="text-sm text-red-600">{erro}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">Composição do Estoque</h3>
-      <div className="flex flex-col sm:flex-row items-center gap-6">
-        <div className="h-52 w-52 shrink-0">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
-                {data.map((entry, index) => <Cell key={index} fill={entry.color} />)}
-              </Pie>
-              <Tooltip formatter={(v) => [`${v}%`]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="flex-1 w-full space-y-2">
-          {subIndicadores.map((s) => (
-            <div key={s.label} className="flex items-center gap-3">
-              <div className="h-3 w-3 rounded-full shrink-0" style={{ background: s.cor }} />
-              <span className="text-xs text-gray-600 flex-1">{s.label}</span>
-              <span className="text-sm font-semibold text-gray-800">{s.valor}{s.unidade}</span>
+    <div className="space-y-4">
+      {/* Cards de sumário */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        {sumario.map((s) => {
+          const cfg = WC_CFG[s.classificacao];
+          return (
+            <button
+              key={s.classificacao}
+              onClick={() => { setFiltro(prev => prev === s.classificacao ? null : s.classificacao); setPagina(50); }}
+              className={cn('rounded-xl border p-4 text-left transition-all shadow-sm hover:shadow-md', cfg.bg, cfg.border, filtro === s.classificacao ? 'ring-2 ring-offset-1' : '')}
+              style={filtro === s.classificacao ? { ringColor: cfg.cor } : {}}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: cfg.cor }} />
+                <span className={cn('text-xs font-semibold', cfg.text)}>{s.label}</span>
+              </div>
+              {loading ? (
+                <div className="h-5 rounded bg-gray-200 animate-pulse w-3/4 mb-1" />
+              ) : (
+                <>
+                  <p className="text-xl font-bold text-gray-900 leading-tight">{s.pct.toFixed(1)}%</p>
+                  <p className="text-[11px] text-gray-500 mt-1">{s.qtd} itens · {fmtBRL(s.custo)}</p>
+                </>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Gráfico + legenda */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">Distribuição do Estoque por Custo</h3>
+        {loading ? (
+          <div className="flex items-center justify-center h-40">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-6">
+            <div className="h-52 w-52 shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
+                    {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => [`${v}%`]} />
+                </PieChart>
+              </ResponsiveContainer>
             </div>
+            <div className="flex-1 w-full space-y-2">
+              {sumario.map((s) => {
+                const cfg = WC_CFG[s.classificacao];
+                const totalCusto = rows.reduce((acc, r) => acc + r.custoTot, 0);
+                const barW = totalCusto > 0 ? (s.custo / totalCusto) * 100 : 0;
+                return (
+                  <div key={s.classificacao} className="flex items-center gap-3">
+                    <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: cfg.cor }} />
+                    <span className="text-xs text-gray-600 w-24 shrink-0">{s.label}</span>
+                    <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${barW}%`, background: cfg.cor }} />
+                    </div>
+                    <span className="text-xs font-semibold text-gray-700 w-10 text-right">{s.pct.toFixed(1)}%</span>
+                    <span className="text-xs text-gray-400 w-24 text-right hidden sm:block">{fmtBRL(s.custo)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tabela de itens */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 p-4 border-b border-gray-100">
+          <span className="text-sm font-semibold text-gray-700 mr-2">Itens de Estoque</span>
+          <button onClick={() => { setFiltro(null); setPagina(50); }} className={btnFiltro(null)}>Todos</button>
+          {WC_ORDER.map((cl) => (
+            <button key={cl} onClick={() => { setFiltro(f => f === cl ? null : cl); setPagina(50); }} className={btnFiltro(cl)}>
+              {WC_CFG[cl].label}
+            </button>
           ))}
+          {!loading && (
+            <span className="ml-auto text-xs text-gray-400">
+              {rowsFiltrados.length} {rowsFiltrados.length === 1 ? 'item' : 'itens'}
+            </span>
+          )}
         </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+          </div>
+        ) : rowsFiltrados.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-400">Nenhum item encontrado.</div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50 text-gray-500">
+                    <th className="px-4 py-2 text-left font-medium">Grupo</th>
+                    <th className="px-4 py-2 text-left font-medium">Cód.</th>
+                    <th className="px-4 py-2 text-left font-medium">Produto</th>
+                    <th className="px-4 py-2 text-right font-medium">Estoque</th>
+                    <th className="px-4 py-2 text-right font-medium">Custo Total</th>
+                    <th className="px-4 py-2 text-right font-medium">Cobertura</th>
+                    <th className="px-4 py-2 text-right font-medium">Dias s/ Giro</th>
+                    <th className="px-4 py-2 text-center font-medium">Classif.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rowsVisiveis.map((r) => {
+                    const cfg = WC_CFG[r.classificacao];
+                    return (
+                      <tr key={r.codProd} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{r.descrGrupoProd}</td>
+                        <td className="px-4 py-2 font-mono text-gray-600">{r.codProd}</td>
+                        <td className="px-4 py-2 text-gray-800 max-w-[240px]">
+                          <span className="line-clamp-1" title={r.descrProd}>{r.descrProd}</span>
+                        </td>
+                        <td className="px-4 py-2 text-right text-gray-700">{fmtQtd(r.estTot)}</td>
+                        <td className="px-4 py-2 text-right font-medium text-gray-800">{fmtBRL(r.custoTot)}</td>
+                        <td className="px-4 py-2 text-right text-gray-600">{r.coberturaDias != null ? `${fmtQtd(r.coberturaDias)} d` : '—'}</td>
+                        <td className="px-4 py-2 text-right text-gray-600">{r.diasSemGiro != null ? `${fmtQtd(r.diasSemGiro)} d` : '—'}</td>
+                        <td className="px-4 py-2 text-center">
+                          <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold border', cfg.bg, cfg.text, cfg.border)}>
+                            {cfg.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {rowsFiltrados.length > pagina && (
+              <div className="flex justify-center p-4 border-t border-gray-100">
+                <button
+                  onClick={() => setPagina(p => p + 50)}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  Mostrar mais ({rowsFiltrados.length - pagina} restantes)
+                </button>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
@@ -579,6 +786,135 @@ function _agregarOpe(ativos: _RawAtivRow[], pontos: _RawPontoRow[]): _AggRow[] {
   }));
 }
 
+/* ── Série diária de OPE ───────────────────────────────────── */
+type _DailyPoint = { data: string; ope: number | null };
+
+function _gerarDiasMes(mes: number, ano: number): string[] {
+  const ultimo = new Date(ano, mes, 0).getDate();
+  return Array.from({ length: ultimo }, (_, i) =>
+    `${String(i + 1).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`
+  );
+}
+
+function _buildDailySeries(
+  ativos: _RawAtivRow[],
+  pontos: _RawPontoRow[],
+  filtroAtiv:  (r: _RawAtivRow)  => boolean,
+  filtroPonto: (r: _RawPontoRow) => boolean,
+  mes: number,
+  ano: number,
+): _DailyPoint[] {
+  return _gerarDiasMes(mes, ano).map(data => {
+    const ha = ativos.filter(r => filtroAtiv(r)  && r.data === data).reduce((s, r) => s + r.horas,      0);
+    const hp = pontos.filter(r => filtroPonto(r) && r.data === data).reduce((s, r) => s + r.horasPonto, 0);
+    const hasData = ha > 0 || hp > 0;
+    return { data, ope: hasData ? (hp > 0 ? parseFloat((ha / hp * 100).toFixed(1)) : 0) : null };
+  });
+}
+
+const _GALP_OPCOES = [
+  { label: 'Galpão 1', fn: (l: string) => _LINHAS_MAIORES.has(l) },
+  { label: 'Galpão 2', fn: (l: string) => _LINHAS_GALP2.has(l)   },
+  { label: 'Galpão 3', fn: (l: string) => _LINHAS_GALP3.has(l)   },
+];
+
+const _SETOR_OPCOES = [
+  { label: 'Acab.',  sm: 'ACAB' },
+  { label: 'Mont.',  sm: 'MONT' },
+  { label: 'Marc.',  sm: 'MARC' },
+  { label: 'Elét.',  sm: 'ELET' },
+  { label: 'Lam.',   sm: 'LAM'  },
+  { label: 'Reb.',   sm: 'REB'  },
+];
+
+function _OpeChart({ series }: { series: _DailyPoint[] }) {
+  if (series.length === 0) {
+    return <div className="flex items-center justify-center h-full text-[10px] text-slate-300">Sem dados</div>;
+  }
+  const tickFormatter = (v: string) => v.slice(0, 2);
+  const opValues = series.map(s => s.ope).filter((v): v is number => v !== null);
+  const max = Math.max(...opValues, 100);
+  const yTicks = [0, 25, 50, 75, 100, ...(max > 100 ? [parseFloat(max.toFixed(1))] : [])];
+
+  const data = series.map((pt, i) => {
+    const janela = series.slice(Math.max(0, i - 4), i + 1).filter(p => p.ope !== null);
+    const mm5 = janela.length > 0
+      ? parseFloat((janela.reduce((s, p) => s + p.ope!, 0) / janela.length).toFixed(1))
+      : null;
+    return { ...pt, mm5 };
+  });
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={data} margin={{ top: 6, right: 8, bottom: 0, left: 4 }}>
+        <XAxis
+          dataKey="data"
+          tickFormatter={tickFormatter}
+          tick={{ fontSize: 9, fill: '#94a3b8' }}
+          tickLine={false}
+          axisLine={false}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          domain={[0, max]}
+          ticks={yTicks}
+          tick={{ fontSize: 9, fill: '#94a3b8' }}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(v) => `${v}%`}
+          width={40}
+        />
+        <Tooltip
+          formatter={(v: number, name: string) => [`${v.toFixed(1)}%`, name === 'mm5' ? 'MM 5d' : 'OPE']}
+          labelFormatter={(l) => `Data: ${l}`}
+          contentStyle={{ fontSize: 11, padding: '4px 8px' }}
+        />
+        {[25, 50, 75, 100].map(v => (
+          <ReferenceLine key={v} y={v} stroke="#cbd5e1" strokeDasharray="3 3" />
+        ))}
+        {max > 100 && <ReferenceLine y={max} stroke="#cbd5e1" strokeDasharray="3 3" />}
+        <Line type="monotone" dataKey="ope" stroke="#6366f1" strokeWidth={1.5} dot={{ r: 2, fill: '#6366f1' }} activeDot={{ r: 4 }} />
+        <Line type="monotone" dataKey="mm5" stroke="#f59e0b" strokeWidth={2} dot={false} strokeDasharray="4 2" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+const _BADGE_CFG: Record<_KpiStatus, { label: string; cls: string }> = {
+  ok:      { label: 'No Prazo', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
+  atencao: { label: 'Atenção',  cls: 'bg-amber-50 text-amber-700 border border-amber-200' },
+  critico: { label: 'Crítico',  cls: 'bg-rose-50 text-rose-600 border border-rose-200' },
+};
+
+function _KpiCard({ titulo, valor, meta, status, delta, deltaUp, loading = false }: {
+  titulo: string; valor: string | null; meta: string;
+  status: _KpiStatus; delta: string; deltaUp: boolean; loading?: boolean;
+}) {
+  const { label, cls } = _BADGE_CFG[status];
+  const deltaColor = status === 'ok' ? 'text-emerald-600' : status === 'atencao' ? 'text-amber-600' : 'text-rose-500';
+  return (
+    <div className="flex-1 min-w-[160px] rounded-2xl border border-slate-100 bg-white shadow-sm p-4 flex flex-col gap-2">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-xs text-slate-500 leading-snug font-medium">{titulo}</span>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${cls}`}>{label}</span>
+      </div>
+      <p className="text-[2rem] font-bold leading-none text-slate-900 tracking-tight">
+        {loading ? <span className="text-slate-300 text-xl">…</span> : (valor ?? '—')}
+      </p>
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-1 text-[11px] text-slate-400">
+          <span className="opacity-40">◎</span> Meta: {meta}
+        </span>
+        {delta && (
+          <span className={`text-[11px] font-semibold ${deltaColor}`}>
+            {deltaUp ? '↗' : '↘'}{delta}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function _OpeGalpaoCard({ rows, loading = false }: { rows: _AggRow[]; loading?: boolean }) {
   const barColor = (s: _KpiStatus) =>
     s === 'ok' ? 'bg-emerald-500' : s === 'atencao' ? 'bg-amber-400' : 'bg-rose-500';
@@ -667,6 +1003,14 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
+  const [galpoesSel, setGalpoesSel] = useState<string[]>([]);
+  const [setoresSel, setSetoresSel] = useState<string[]>([]);
+
+  const toggleGalpao = (label: string) =>
+    setGalpoesSel(prev => prev.includes(label) ? prev.filter(x => x !== label) : [...prev, label]);
+  const toggleSetor = (sm: string) =>
+    setSetoresSel(prev => prev.includes(sm) ? prev.filter(x => x !== sm) : [...prev, sm]);
+
   useEffect(() => {
     setLoading(true);
     setErro(null);
@@ -693,6 +1037,41 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
 
   const ope = useMemo(() => _agregarOpe(dadosAtiv, dadosPonto), [dadosAtiv, dadosPonto]);
 
+  const opeKpi = useMemo(() => {
+    const row = ope.find(o => o.label === 'Geral');
+    if (!row || row.horasReg === 0) return null;
+    const pct  = row.horas / row.horasReg * 100;
+    const diff = pct - _OPE_META_PCT;
+    const status: _KpiStatus =
+      pct >= _OPE_META_PCT      ? 'ok' :
+      pct >= _OPE_META_PCT - 10 ? 'atencao' : 'critico';
+    return {
+      valor:   `${pct.toFixed(1).replace('.', ',')}%`,
+      status,
+      delta:   `${Math.abs(diff).toFixed(1).replace('.', ',')}p.p.`,
+      deltaUp: diff > 0,
+    };
+  }, [ope]);
+
+  const seriesUnificada = useMemo(() => {
+    const filtroLinha = (l: string) => {
+      if (galpoesSel.length === 0) return true;
+      return _GALP_OPCOES.filter(o => galpoesSel.includes(o.label)).some(o => o.fn(l));
+    };
+    const filtroSetor = (sm: string) => setoresSel.length === 0 || setoresSel.includes(sm);
+    return _buildDailySeries(
+      dadosAtiv, dadosPonto,
+      r => filtroLinha(r.linha) && filtroSetor(r.setorMacro),
+      r => filtroLinha(r.linha) && filtroSetor(r.setorMacro),
+      mes, ano,
+    );
+  }, [dadosAtiv, dadosPonto, galpoesSel, setoresSel, mes, ano]);
+
+  const btnCls = (active: boolean) =>
+    `px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+      active ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+    }`;
+
   if (erro) {
     return (
       <div className="w-full rounded-2xl border border-slate-100 bg-white shadow-sm p-5">
@@ -702,5 +1081,57 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
     );
   }
 
-  return <_OpeGalpaoCard rows={ope} loading={loading} />;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-3 flex-wrap">
+        <_KpiCard
+          titulo="OPE Geral da Fábrica"
+          valor={opeKpi?.valor ?? null}
+          meta={`${_OPE_META_PCT}%`}
+          status={opeKpi?.status ?? 'atencao'}
+          delta={opeKpi?.delta ?? ''}
+          deltaUp={opeKpi?.deltaUp ?? false}
+          loading={loading}
+        />
+        <_KpiCard titulo="Aderência de Entrega de Embarcações" valor={null} meta="95%"    status="atencao" delta="" deltaUp={false} />
+        <_KpiCard titulo="Absenteísmo"                         valor={null} meta="3%"     status="atencao" delta="" deltaUp={false} />
+        <_KpiCard titulo="Horas Extras"                        valor={null} meta="300 h"  status="atencao" delta="" deltaUp={false} />
+      </div>
+      <_OpeGalpaoCard rows={ope} loading={loading} />
+
+      {/* OPE diário */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col p-4 gap-3">
+        <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">OPE diário</span>
+
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold text-slate-400 mr-1">Galpão:</span>
+            <button onClick={() => setGalpoesSel([])} className={btnCls(galpoesSel.length === 0)}>Geral</button>
+            {_GALP_OPCOES.map(o => (
+              <button key={o.label} onClick={() => toggleGalpao(o.label)} className={btnCls(galpoesSel.includes(o.label))}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold text-slate-400 mr-1">Setor:</span>
+            <button onClick={() => setSetoresSel([])} className={btnCls(setoresSel.length === 0)}>Todos</button>
+            {_SETOR_OPCOES.map(o => (
+              <button key={o.sm} onClick={() => toggleSetor(o.sm)} className={btnCls(setoresSel.includes(o.sm))}>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="h-[220px]">
+          {loading ? (
+            <div className="flex items-center justify-center h-full text-[10px] text-slate-300">Carregando...</div>
+          ) : (
+            <_OpeChart series={seriesUnificada} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
