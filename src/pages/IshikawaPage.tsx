@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Target, Calendar, User, GitBranch, Fish, ClipboardList, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Plus, Target, Calendar, User, GitBranch, Fish, ClipboardList, ChevronRight, MoreVertical, Pencil, Trash2, Info } from 'lucide-react';
 import { mockIndicadores } from '@/data/mockIndicadores';
 import { getAnalise } from '@/services/analisesService';
-import { getCausasByAnalise, incrementPlanosCount } from '@/services/causasService';
+import { getCausasByAnalise, incrementPlanosCount, deleteCausa } from '@/services/causasService';
 import type { Analise, Causa } from '@/types';
 import { Button } from '@/components/ui/button';
 import { CausaEfeitoModal } from '@/pages/CausaEfeitoModal';
@@ -67,7 +67,7 @@ function Bone({ lx, ly, jx, color, causes }: {
               x={px - 25} y={isTop ? py - 4 : py + 11}
               textAnchor="end" fontSize={10} fill="#4B5563" fontFamily="system-ui,sans-serif"
             >
-              {trunc(causa.descricao)}
+              {trunc(causa.titulo || causa.descricao)}
             </text>
           </g>
         );
@@ -141,7 +141,12 @@ export default function IshikawaPage() {
   const [causas, setCausas] = useState<Causa[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [planTarget, setPlanTarget] = useState<Causa | null>(null);
+  const [editTarget, setEditTarget] = useState<Causa | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Causa | null>(null);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const load = async () => {
     if (!analiseId) return;
@@ -265,10 +270,49 @@ export default function IshikawaPage() {
                 <ul className="space-y-2">
                   {list.map((c) => (
                     <li key={c.id} className="rounded-lg border border-white bg-white/70 p-3 space-y-2.5">
-                      {/* Descrição */}
+                      {/* Título + tooltip de detalhamento + menu */}
                       <div className="flex items-start gap-2">
                         <span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: cfg.color }} />
-                        <span className="text-sm text-gray-700 leading-snug">{c.descricao}</span>
+                        <span className="text-sm font-medium text-gray-800 leading-snug flex-1">{c.titulo}</span>
+
+                        {/* Ícone de detalhamento */}
+                        {c.descricao && (
+                          <div className="relative group shrink-0 mt-0.5">
+                            <Info className="h-3.5 w-3.5 text-gray-400 cursor-help hover:text-gray-600 transition-colors" />
+                            <div className="pointer-events-none absolute right-0 top-5 z-30 hidden group-hover:block w-56 rounded-lg border border-gray-200 bg-white shadow-lg p-2.5 text-xs text-gray-600 leading-relaxed">
+                              {c.descricao}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Botão de opções */}
+                        <div className="relative shrink-0" ref={menuOpen === c.id ? menuRef : undefined}>
+                          <button
+                            onClick={() => setMenuOpen(menuOpen === c.id ? null : c.id)}
+                            className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                          >
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </button>
+
+                          {menuOpen === c.id && (
+                            <div className="absolute right-0 top-6 z-20 w-32 rounded-lg border border-gray-200 bg-white shadow-md py-1">
+                              <button
+                                onClick={() => { setEditTarget(c); setMenuOpen(null); }}
+                                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                              >
+                                <Pencil className="h-3 w-3 text-gray-400" />
+                                Editar
+                              </button>
+                              <button
+                                onClick={() => { setDeleteTarget(c); setMenuOpen(null); }}
+                                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                Excluir
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
 
                       {/* Footer: planos count + CTA */}
@@ -314,10 +358,60 @@ export default function IshikawaPage() {
         />
       )}
 
+      {editTarget && analise && (
+        <CausaEfeitoModal
+          indicadorId={analise.indicadorId}
+          indicadorNome={indicador?.nome ?? analise.indicadorId}
+          causa={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => { load(); setEditTarget(null); }}
+        />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 border border-red-200">
+                <Trash2 className="h-5 w-5 text-red-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Excluir causa</p>
+                <p className="text-xs text-gray-500 mt-0.5">Esta ação não pode ser desfeita.</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 leading-snug">
+              {deleteTarget.descricao}
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await deleteCausa(deleteTarget.id, deleteTarget.analiseId);
+                    await load();
+                    setDeleteTarget(null);
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+              >
+                {deleting ? 'Excluindo…' : 'Excluir'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {planTarget && analise && (
         <NovoPlanModal
           indicadorId={analise.indicadorId}
-          causaDefault={planTarget.descricao}
+          causaDefault={planTarget.titulo || planTarget.descricao}
           causaId={planTarget.id}
           analiseId={analise.id}
           onClose={() => setPlanTarget(null)}
@@ -327,6 +421,11 @@ export default function IshikawaPage() {
             setPlanTarget(null);
           }}
         />
+      )}
+
+      {/* Fecha menu ao clicar fora */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(null)} />
       )}
     </div>
   );

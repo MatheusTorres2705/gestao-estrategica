@@ -43,6 +43,7 @@ export type Causa = {
   indicadorId: string;
   problema: string;
   categoria: '6M-maquina' | '6M-mao-de-obra' | '6M-metodo' | '6M-material' | '6M-meio-ambiente' | '6M-medicao';
+  titulo: string;
   descricao: string;
   responsavel: string;
   dataCriacao: string;
