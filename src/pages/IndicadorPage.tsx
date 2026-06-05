@@ -3,14 +3,14 @@ import { useParams, useOutletContext, useNavigate, Link } from 'react-router-dom
 import {
   ChevronLeft, Plus, TrendingUp, TrendingDown, Minus,
   Target, ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3,
+  Fish, ChevronRight, Calendar, User, X, AlertCircle, MoreHorizontal, Pencil, Trash2,
 } from 'lucide-react';
 import { TrendChart } from '@/components/TrendChart';
 import { getIndicadorDetalhe } from '@/services/indicadoresService';
-import { getCausas } from '@/services/causasService';
-import type { Indicador, Causa } from '@/types';
+import { getAnalises, saveAnalise, updateAnalise, deleteAnalise } from '@/services/analisesService';
+import type { Indicador, Analise } from '@/types';
 import { calcPctAtingimento, statusBscFromPct } from '@/types';
 import { fmtPeriodo } from '@/lib/formatters';
-import { CausaEfeitoModal } from '@/pages/CausaEfeitoModal';
 import { OpeDetalhamentoModal } from '@/pages/OpeDetalhamentoModal';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,14 +28,6 @@ const ICONS: Record<string, React.ElementType> = {
   ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3,
 };
 
-const CATEGORIA_LABELS: Record<string, string> = {
-  '6M-maquina': 'Máquina',
-  '6M-mao-de-obra': 'Mão de Obra',
-  '6M-metodo': 'Método',
-  '6M-material': 'Material',
-  '6M-meio-ambiente': 'Meio Ambiente',
-  '6M-medicao': 'Medição',
-};
 
 const STATUS_BSC_CFG = {
   'no-prazo': { label: 'No Prazo', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
@@ -48,14 +40,82 @@ export default function IndicadorPage() {
   const { mes, ano } = useOutletContext<OutletCtx>();
   const nav = useNavigate();
   const [indicador, setIndicador] = useState<Indicador | undefined>();
-  const [causas, setCausas] = useState<Causa[]>([]);
-  const [showCausaModal, setShowCausaModal] = useState(false);
+  const [analises, setAnalises] = useState<Analise[]>([]);
+  const [showNovaAnalise, setShowNovaAnalise] = useState(false);
+  const [novoProblema, setNovoProblema] = useState('');
+  const [novoResponsavel, setNovoResponsavel] = useState('');
+  const [savingAnalise, setSavingAnalise] = useState(false);
+  const [erroAnalise, setErroAnalise] = useState<string | null>(null);
+
+  const [menuAberto, setMenuAberto] = useState<string | null>(null);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [editProblema, setEditProblema] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [confirmandoDelete, setConfirmandoDelete] = useState<string | null>(null);
+  const [deletando, setDeletando] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     getIndicadorDetalhe(id, mes, ano).then(setIndicador);
-    getCausas(id).then(setCausas);
+    getAnalises(id).then(setAnalises);
   }, [id, mes, ano]);
+
+  async function handleSaveAnalise() {
+    if (!novoProblema.trim() || !novoResponsavel.trim()) {
+      setErroAnalise('Preencha o desvio e o responsável.');
+      return;
+    }
+    setSavingAnalise(true);
+    setErroAnalise(null);
+    try {
+      const nova = await saveAnalise({
+        indicadorId: indicador!.id,
+        problema: novoProblema,
+        responsavel: novoResponsavel,
+        dataCriacao: new Date().toISOString().split('T')[0],
+        mes,
+        ano,
+      });
+      nav(`/ishikawa/${nova.id}`);
+    } catch {
+      setErroAnalise('Erro ao salvar análise.');
+    } finally {
+      setSavingAnalise(false);
+    }
+  }
+
+  function abrirEdicao(a: Analise) {
+    setMenuAberto(null);
+    setEditandoId(a.id);
+    setEditProblema(a.problema);
+  }
+
+  async function handleSaveEdit(id: string) {
+    if (!editProblema.trim()) return;
+    setSavingEdit(true);
+    try {
+      await updateAnalise(id, editProblema.trim());
+      setAnalises(prev => prev.map(a => a.id === id ? { ...a, problema: editProblema.trim() } : a));
+      setEditandoId(null);
+    } catch {
+      // mantém o form aberto em caso de erro
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
+  async function handleDeleteAnalise(id: string) {
+    setDeletando(true);
+    try {
+      await deleteAnalise(id);
+      setAnalises(prev => prev.filter(a => a.id !== id));
+      setConfirmandoDelete(null);
+    } catch {
+      // mantém confirmação aberta em caso de erro
+    } finally {
+      setDeletando(false);
+    }
+  }
 
   if (!indicador) {
     return (
@@ -159,59 +219,191 @@ export default function IndicadorPage() {
       {indicador.id === 'pcm' && indicador.detalheExtra && <PcmDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'producao' && <ProducaoDetalhe mes={mes} ano={ano} />}
 
-      {/* Causas */}
+      {/* Análises de Ishikawa */}
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-sm font-semibold text-gray-800">Análise de Causa e Efeito</h3>
-            <p className="text-xs text-gray-500 mt-0.5">{causas.length} análise(s)</p>
+            <p className="text-xs text-gray-500 mt-0.5">{analises.length} análise(s)</p>
           </div>
-          <Button size="sm" onClick={() => setShowCausaModal(true)}>
-            <Plus className="h-3.5 w-3.5" /> Nova Análise
-          </Button>
+          {!showNovaAnalise && (
+            <Button size="sm" onClick={() => { setShowNovaAnalise(true); setErroAnalise(null); }}>
+              <Plus className="h-3.5 w-3.5" /> Nova Análise
+            </Button>
+          )}
         </div>
 
-        {causas.length === 0 ? (
+        {/* Form inline de nova análise */}
+        {showNovaAnalise && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3 mb-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-blue-700">Nova Análise</p>
+              <button
+                onClick={() => { setShowNovaAnalise(false); setErroAnalise(null); setNovoProblema(''); setNovoResponsavel(''); }}
+                className="rounded p-0.5 text-blue-400 hover:text-blue-600 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600 uppercase tracking-wider">Desvio / Problema *</label>
+              <textarea
+                value={novoProblema}
+                onChange={e => setNovoProblema(e.target.value)}
+                placeholder="Ex: Gate G3 abaixo da meta (81%)"
+                rows={2}
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-gray-600 uppercase tracking-wider">Responsável *</label>
+              <input
+                value={novoResponsavel}
+                onChange={e => setNovoResponsavel(e.target.value)}
+                placeholder="Nome do responsável"
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+            </div>
+            {erroAnalise && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                <p className="text-xs text-red-600">{erroAnalise}</p>
+              </div>
+            )}
+            <Button onClick={handleSaveAnalise} disabled={savingAnalise} className="w-full">
+              {savingAnalise ? 'Criando…' : 'Criar e Abrir Diagrama'}
+            </Button>
+          </div>
+        )}
+
+        {/* Lista de análises */}
+        {analises.length === 0 && !showNovaAnalise ? (
           <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center">
+            <div className="flex justify-center mb-3">
+              <div className="h-12 w-12 rounded-full bg-gray-100 flex items-center justify-center">
+                <Fish className="h-6 w-6 text-gray-300" />
+              </div>
+            </div>
             <p className="text-gray-400 text-sm">Nenhuma análise registrada ainda.</p>
-            <button onClick={() => setShowCausaModal(true)} className="mt-2 text-sm text-blue-600 hover:underline">
+            <button onClick={() => { setShowNovaAnalise(true); setErroAnalise(null); }} className="mt-2 text-sm text-blue-600 hover:underline">
               Criar primeira análise
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
-            {causas.map((causa) => (
-              <div key={causa.id} className="flex items-start gap-4 rounded-xl border border-gray-100 p-4 hover:bg-gray-50 transition-colors">
-                <div className="mt-0.5 h-8 w-8 shrink-0 rounded-lg bg-blue-50 border border-blue-100 flex items-center justify-center">
-                  <span className="text-xs font-bold text-blue-600">{CATEGORIA_LABELS[causa.categoria]?.charAt(0)}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{causa.problema}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{CATEGORIA_LABELS[causa.categoria]} — {causa.responsavel}</p>
+          <>
+          {/* overlay para fechar menu ao clicar fora */}
+          {menuAberto && (
+            <div className="fixed inset-0 z-10" onClick={() => setMenuAberto(null)} />
+          )}
+
+          <ul className="space-y-2">
+            {analises.map((a) => {
+              if (editandoId === a.id) {
+                return (
+                  <li key={a.id}>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-blue-700">Editar Análise</p>
+                        <button
+                          onClick={() => setEditandoId(null)}
+                          className="rounded p-0.5 text-blue-400 hover:text-blue-600 transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <textarea
+                        value={editProblema}
+                        onChange={e => setEditProblema(e.target.value)}
+                        rows={2}
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
+                      />
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => handleSaveEdit(a.id)} disabled={savingEdit || !editProblema.trim()}>
+                          {savingEdit ? 'Salvando…' : 'Salvar'}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditandoId(null)}>Cancelar</Button>
+                      </div>
                     </div>
-                    <span className="shrink-0 text-xs text-gray-400">{causa.dataCriacao}</span>
+                  </li>
+                );
+              }
+
+              if (confirmandoDelete === a.id) {
+                return (
+                  <li key={a.id}>
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-4 space-y-3">
+                      <p className="text-sm font-semibold text-red-700">Excluir análise?</p>
+                      <p className="text-xs text-red-600 leading-relaxed">
+                        Isso removerá permanentemente a análise, todas as causas e planos de ação vinculados.
+                      </p>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="destructive" onClick={() => handleDeleteAnalise(a.id)} disabled={deletando}>
+                          {deletando ? 'Excluindo…' : 'Confirmar exclusão'}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirmandoDelete(null)}>Cancelar</Button>
+                      </div>
+                    </div>
+                  </li>
+                );
+              }
+
+              return (
+                <li key={a.id} className="relative">
+                  <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40 transition-all group">
+                    <button
+                      onClick={() => nav(`/ishikawa/${a.id}`)}
+                      className="flex items-center gap-3 flex-1 min-w-0 p-4 text-left"
+                    >
+                      <div className="h-8 w-8 rounded-lg bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
+                        <Fish className="h-4 w-4 text-orange-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 leading-snug truncate">{a.problema}</p>
+                        <div className="flex items-center gap-3 mt-1">
+                          <span className="flex items-center gap-1 text-xs text-gray-400">
+                            <User className="h-3 w-3" />{a.responsavel}
+                          </span>
+                          <span className="flex items-center gap-1 text-xs text-gray-400">
+                            <Calendar className="h-3 w-3" />{a.dataCriacao}
+                          </span>
+                        </div>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-blue-500 transition-colors shrink-0" />
+                    </button>
+
+                    {/* Botão de opções */}
+                    <div className="relative pr-3 z-20">
+                      <button
+                        onClick={e => { e.stopPropagation(); setMenuAberto(menuAberto === a.id ? null : a.id); }}
+                        className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                      {menuAberto === a.id && (
+                        <div className="absolute right-0 top-full mt-1 w-36 rounded-xl border border-gray-200 bg-white shadow-lg z-30 overflow-hidden">
+                          <button
+                            onClick={() => abrirEdicao(a)}
+                            className="flex items-center gap-2 w-full px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <Pencil className="h-3.5 w-3.5 text-gray-400" /> Editar
+                          </button>
+                          <button
+                            onClick={() => { setMenuAberto(null); setConfirmandoDelete(a.id); }}
+                            className="flex items-center gap-2 w-full px-3 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" /> Excluir
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2">{causa.descricao}</p>
-                  {causa.planosCount > 0 && (
-                    <p className="text-xs text-blue-600 mt-2">{causa.planosCount} plano(s) vinculado(s)</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+                </li>
+              );
+            })}
+          </ul>
+          </>
         )}
       </div>
-
-      {showCausaModal && (
-        <CausaEfeitoModal
-          indicadorId={indicador.id}
-          indicadorNome={indicador.nome}
-          onClose={() => setShowCausaModal(false)}
-          onSaved={(nova) => { setCausas((p) => [...p, nova]); setShowCausaModal(false); }}
-        />
-      )}
     </div>
   );
 }

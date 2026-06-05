@@ -41,6 +41,47 @@ export async function getAnalise(id: string): Promise<Analise | undefined> {
   return rows[0] ? mapAnalise(rows[0]) : undefined;
 }
 
+export async function updateAnalise(id: string, problema: string): Promise<void> {
+  await api.post('/api/sankhya/dataset/save', {
+    entity: 'AD_ISHANALISE',
+    pk: { CODISH: Number(id) },
+    fields: ['CODISH', 'PROBLEMA'],
+    values: { 0: Number(id), 1: problema },
+  });
+}
+
+export async function deleteAnalise(id: string): Promise<void> {
+  const codish = Number(id);
+
+  // 1. Busca planos vinculados (direto pelo CODISH)
+  const planos = await obterReg<Record<string, unknown>>(
+    `SELECT CODPLANO, CODCAUSA, CODISH FROM AD_ISHPLANO WHERE CODISH = ${codish}`,
+  );
+  if (planos.length > 0) {
+    await api.post('/api/sankhya/dataset/remove', {
+      entity: 'AD_ISHPLANO',
+      pks: planos.map(p => ({ CODPLANO: Number(p['CODPLANO']), CODCAUSA: Number(p['CODCAUSA']), CODISH: codish })),
+    });
+  }
+
+  // 2. Busca causas vinculadas
+  const causas = await obterReg<Record<string, unknown>>(
+    `SELECT CODCAUSA, CODISH FROM AD_ISHCAUSA WHERE CODISH = ${codish}`,
+  );
+  if (causas.length > 0) {
+    await api.post('/api/sankhya/dataset/remove', {
+      entity: 'AD_ISHCAUSA',
+      pks: causas.map(c => ({ CODCAUSA: Number(c['CODCAUSA']), CODISH: codish })),
+    });
+  }
+
+  // 3. Remove a análise
+  await api.post('/api/sankhya/dataset/remove', {
+    entity: 'AD_ISHANALISE',
+    pks: [{ CODISH: codish }],
+  });
+}
+
 export async function saveAnalise(data: Omit<Analise, 'id'>): Promise<Analise> {
   const seq = await obterReg<{ NEXTCOD: number }>(
     'SELECT NVL(MAX(CODISH), 0) + 1 AS NEXTCOD FROM AD_ISHANALISE',
