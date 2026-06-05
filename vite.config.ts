@@ -10,7 +10,15 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
-    proxy: {},
+    port: 3150,
+    host: true,
+    allowedHosts: ['sankhya.nxboats.com.br'],
+    proxy: {
+      '/api': {
+        target: 'https://sankhya.nxboats.com.br',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 })

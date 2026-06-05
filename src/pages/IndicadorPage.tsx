@@ -11,6 +11,7 @@ import type { Indicador, Causa } from '@/types';
 import { calcPctAtingimento, statusBscFromPct } from '@/types';
 import { fmtPeriodo } from '@/lib/formatters';
 import { CausaEfeitoModal } from '@/pages/CausaEfeitoModal';
+import { OpeDetalhamentoModal } from '@/pages/OpeDetalhamentoModal';
 import { Button } from '@/components/ui/button';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
@@ -986,6 +987,7 @@ function _OpeGalpaoCard({ rows, loading = false }: { rows: _AggRow[]; loading?: 
 
 function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
   const now = new Date();
+  const [showDetalhamento, setShowDetalhamento] = useState(false);
 
   const periodoIni = useMemo(() =>
     `01/${String(mes).padStart(2, '0')}/${ano}`
@@ -1099,9 +1101,19 @@ function ProducaoDetalhe({ mes, ano }: { mes: number; ano: number }) {
       </div>
       <_OpeGalpaoCard rows={ope} loading={loading} />
 
+      {showDetalhamento && <OpeDetalhamentoModal onClose={() => setShowDetalhamento(false)} />}
+
       {/* OPE diário */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col p-4 gap-3">
-        <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">OPE diário</span>
+        <div className="flex items-center justify-between">
+          <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">OPE diário</span>
+          <button
+            onClick={() => setShowDetalhamento(true)}
+            className="rounded-lg px-2.5 py-1 text-[10px] font-semibold text-indigo-500 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+          >
+            Detalhamento
+          </button>
+        </div>
 
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-1">
