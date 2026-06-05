@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line,
@@ -35,8 +35,8 @@ function parseDDMMYYYY(s: string): number {
 }
 
 /* ── Grupos de linha ───────────────────────────────────────── */
-const LINHAS_MAIORES     = new Set(['NX260','NX270','NX280','NX290','NX310','NX340','NX350','NX360','NX370']);
-const LINHAS_MENORES     = new Set(['NX410','NX440','NX500','NX620']);
+const LINHAS_MENORES     = new Set(['NX260','NX270','NX280','NX290','NX310','NX340','NX350','NX360','NX370']);
+const LINHAS_MAIORES     = new Set(['NX410','NX440','NX500','NX620']);
 const LINHAS_GALP2       = new Set(['NX410','NX440']);
 const LINHAS_GALP3       = new Set(['NX500','NX620']);
 
@@ -349,15 +349,71 @@ function OpeChart({ series, loading }: { series: DailyPoint[]; loading: boolean 
   );
 }
 
-/* ── Tabela + gráfico por seção ────────────────────────────── */
-function Secao({ titulo, tipo, linhas, dadosAtivGraf, dadosPontoGraf, loadingTab, loadingGraf }: {
+/* ── Tabela por seção ──────────────────────────────────────── */
+function TabelaCard({ titulo, linhas, loading }: {
+  titulo: string;
+  linhas: AggRow[];
+  loading: boolean;
+}) {
+  const totAtivQtd  = linhas.reduce((s, l) => s + l.qtdAtiv,  0);
+  const totAtivH    = linhas.reduce((s, l) => s + l.horas,    0);
+  const totPontoQtd = linhas.reduce((s, l) => s + l.qtdPonto, 0);
+  const totPontoH   = linhas.reduce((s, l) => s + l.horasReg, 0);
+  const ratio = (a: number, b: number) => b > 0 ? `${(a / b * 100).toFixed(1)}%` : '—';
+  const col = 'grid-cols-[90px_46px_66px_46px_66px_52px]';
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{titulo}</span>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className={`grid ${col} px-3 pt-2 pb-0`}>
+          <span />
+          <span className="text-[9px] font-bold text-blue-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-blue-200">Atividades</span>
+          <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-emerald-200">Ponto</span>
+          <span />
+        </div>
+        <div className={`grid ${col} px-3 py-1 border-b border-slate-100 bg-slate-50`}>
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Setor</span>
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
+          <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wide text-right">OPE</span>
+        </div>
+        {loading ? (
+          <p className="px-3 py-3 text-xs text-slate-300">Carregando...</p>
+        ) : linhas.map(l => (
+          <div key={l.label} className={`grid ${col} px-3 py-1.5 border-b border-slate-50 last:border-0`}>
+            <span className="text-xs text-slate-700 truncate">{l.label}</span>
+            <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdAtiv}</span>
+            <span className="text-xs font-semibold text-blue-600 text-right tabular-nums">{l.horas.toFixed(2)}</span>
+            <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdPonto}</span>
+            <span className="text-xs font-semibold text-emerald-600 text-right tabular-nums">{l.horasReg.toFixed(2)}</span>
+            <span className="text-xs font-semibold text-indigo-500 text-right tabular-nums">{ratio(l.horas, l.horasReg)}</span>
+          </div>
+        ))}
+        {!loading && (
+          <div className={`grid ${col} px-3 py-1.5 border-t border-slate-200 bg-slate-50`}>
+            <span className="text-xs font-bold text-slate-600">Total</span>
+            <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totAtivQtd}</span>
+            <span className="text-xs font-bold text-blue-700 text-right tabular-nums">{totAtivH.toFixed(2)}</span>
+            <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totPontoQtd}</span>
+            <span className="text-xs font-bold text-emerald-700 text-right tabular-nums">{totPontoH.toFixed(2)}</span>
+            <span className="text-xs font-bold text-indigo-600 text-right tabular-nums">{ratio(totAtivH, totPontoH)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Gráfico por seção ─────────────────────────────────────── */
+function GraficoCard({ titulo, tipo, dadosAtivGraf, dadosPontoGraf, loading }: {
   titulo: string;
   tipo: 'maiores' | 'menores' | 'ope';
-  linhas: AggRow[];
   dadosAtivGraf: RawAtivRow[];
   dadosPontoGraf: RawPontoRow[];
-  loadingTab: boolean;
-  loadingGraf: boolean;
+  loading: boolean;
 }) {
   const [selecionado, setSelecionado] = useState('Geral');
 
@@ -380,86 +436,28 @@ function Secao({ titulo, tipo, linhas, dadosAtivGraf, dadosPontoGraf, loadingTab
     ? OPCOES_GALP_GRAF.map(o => o.label)
     : OPCOES_SETOR_GRAF.map(o => o.label);
 
-  const totAtivQtd  = linhas.reduce((s, l) => s + l.qtdAtiv,  0);
-  const totAtivH    = linhas.reduce((s, l) => s + l.horas,    0);
-  const totPontoQtd = linhas.reduce((s, l) => s + l.qtdPonto, 0);
-  const totPontoH   = linhas.reduce((s, l) => s + l.horasReg, 0);
-  const ratio = (a: number, b: number) => b > 0 ? `${(a / b * 100).toFixed(1)}%` : '—';
-
-  const col = 'grid-cols-[90px_46px_66px_46px_66px_52px]';
-
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{titulo}</span>
-
-      <div className="flex gap-3 items-stretch flex-wrap xl:flex-nowrap">
-        {/* Tabela */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden shrink-0">
-          <div className={`grid ${col} px-3 pt-2 pb-0`}>
-            <span />
-            <span className="text-[9px] font-bold text-blue-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-blue-200">
-              Atividades
-            </span>
-            <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-emerald-200">
-              Ponto
-            </span>
-            <span />
-          </div>
-          <div className={`grid ${col} px-3 py-1 border-b border-slate-100 bg-slate-50`}>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Setor</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
-            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
-            <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wide text-right">OPE</span>
-          </div>
-          {loadingTab ? (
-            <p className="px-3 py-3 text-xs text-slate-300">Carregando...</p>
-          ) : linhas.map(l => (
-            <div key={l.label} className={`grid ${col} px-3 py-1.5 border-b border-slate-50 last:border-0`}>
-              <span className="text-xs text-slate-700 truncate">{l.label}</span>
-              <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdAtiv}</span>
-              <span className="text-xs font-semibold text-blue-600 text-right tabular-nums">{l.horas.toFixed(2)}</span>
-              <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdPonto}</span>
-              <span className="text-xs font-semibold text-emerald-600 text-right tabular-nums">{l.horasReg.toFixed(2)}</span>
-              <span className="text-xs font-semibold text-indigo-500 text-right tabular-nums">{ratio(l.horas, l.horasReg)}</span>
-            </div>
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col p-3">
+        <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider mb-1.5">OPE diário</span>
+        <div className="flex flex-wrap gap-1 mb-2">
+          {opcoesBotoes.map(label => (
+            <button
+              key={label}
+              onClick={() => setSelecionado(label)}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                selecionado === label
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {label}
+            </button>
           ))}
-          {!loadingTab && (
-            <div className={`grid ${col} px-3 py-1.5 border-t border-slate-200 bg-slate-50`}>
-              <span className="text-xs font-bold text-slate-600">Total</span>
-              <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totAtivQtd}</span>
-              <span className="text-xs font-bold text-blue-700 text-right tabular-nums">{totAtivH.toFixed(2)}</span>
-              <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totPontoQtd}</span>
-              <span className="text-xs font-bold text-emerald-700 text-right tabular-nums">{totPontoH.toFixed(2)}</span>
-              <span className="text-xs font-bold text-indigo-600 text-right tabular-nums">{ratio(totAtivH, totPontoH)}</span>
-            </div>
-          )}
         </div>
-
-        {/* Card do gráfico */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm flex flex-col p-3 flex-1 min-w-[280px]">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[9px] font-bold text-indigo-400 uppercase tracking-wider">OPE diário</span>
-          </div>
-          <div className="flex flex-wrap gap-1 mb-2">
-            {opcoesBotoes.map(label => (
-              <button
-                key={label}
-                onClick={() => setSelecionado(label)}
-                className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
-                  selecionado === label
-                    ? 'bg-indigo-500 text-white'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex-1 min-h-[110px]">
-            <OpeChart series={series} loading={loadingGraf} />
-          </div>
+        <div className="h-[110px]">
+          <OpeChart series={series} loading={loading} />
         </div>
       </div>
     </div>
@@ -483,16 +481,15 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
   const [loadingGraf,    setLoadingGraf]    = useState(false);
   const [erroGraf,       setErroGraf]       = useState<string | null>(null);
 
-  /* fetch tabela */
-  useEffect(() => {
-    if (!periodoTab.ini || !periodoTab.fim) return;
+  /* fetch tabela — disparado manualmente */
+  function fetchTabela(ini: string, fim: string) {
     setLoadingTab(true); setErroTab(null);
     const queries = [LINHAS_MAIORES_ARR, LINHAS_MENORES_ARR].flatMap(linhas =>
       SETORES_SQL.flatMap(setor => [
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        obterReg<Record<string, any>>(buildSqlAtividades(periodoTab.ini, periodoTab.fim, linhas, setor)),
+        obterReg<Record<string, any>>(buildSqlAtividades(ini, fim, linhas, setor)),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        obterReg<Record<string, any>>(buildSqlPonto(periodoTab.ini, periodoTab.fim, linhas, setor)),
+        obterReg<Record<string, any>>(buildSqlPonto(ini, fim, linhas, setor)),
       ])
     );
     Promise.all(queries)
@@ -508,18 +505,17 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
       })
       .catch(() => setErroTab('Falha ao carregar tabela'))
       .finally(() => setLoadingTab(false));
-  }, [periodoTab]);
+  }
 
-  /* fetch gráfico */
-  useEffect(() => {
-    if (!periodoGraf.ini || !periodoGraf.fim) return;
+  /* fetch gráfico — disparado manualmente */
+  function fetchGrafico(ini: string, fim: string) {
     setLoadingGraf(true); setErroGraf(null);
     const queries = [LINHAS_MAIORES_ARR, LINHAS_MENORES_ARR].flatMap(linhas =>
       SETORES_SQL.flatMap(setor => [
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        obterReg<Record<string, any>>(buildSqlAtividades(periodoGraf.ini, periodoGraf.fim, linhas, setor)),
+        obterReg<Record<string, any>>(buildSqlAtividades(ini, fim, linhas, setor)),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        obterReg<Record<string, any>>(buildSqlPonto(periodoGraf.ini, periodoGraf.fim, linhas, setor)),
+        obterReg<Record<string, any>>(buildSqlPonto(ini, fim, linhas, setor)),
       ])
     );
     Promise.all(queries)
@@ -535,7 +531,17 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
       })
       .catch(() => setErroGraf('Falha ao carregar gráfico'))
       .finally(() => setLoadingGraf(false));
-  }, [periodoGraf]);
+  }
+
+  function handleAplicarTab() {
+    if (!periodoTab.ini || !periodoTab.fim) return;
+    fetchTabela(periodoTab.ini, periodoTab.fim);
+  }
+
+  function handleAplicarGraf() {
+    if (!periodoGraf.ini || !periodoGraf.fim) return;
+    fetchGrafico(periodoGraf.ini, periodoGraf.fim);
+  }
 
   const maiores = useMemo(() => agregar(dadosAtiv, dadosPonto, l => LINHAS_MAIORES.has(l)), [dadosAtiv, dadosPonto]);
   const menores = useMemo(() => agregar(dadosAtiv, dadosPonto, l => LINHAS_MENORES.has(l)), [dadosAtiv, dadosPonto]);
@@ -544,9 +550,20 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
   const inputCls = 'rounded border border-slate-200 px-2 py-1 text-xs text-slate-800 outline-none focus:border-indigo-400';
   const labelCls = 'text-xs text-slate-400 shrink-0';
 
+  const btnAplicar = (disabled: boolean, loading: boolean, onClick: () => void) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="px-4 py-1.5 rounded-lg bg-indigo-500 text-white text-xs font-semibold hover:bg-indigo-600 active:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    >
+      {loading ? 'Carregando...' : 'Aplicar'}
+    </button>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto">
-      <div className="w-full max-w-5xl rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl my-4">
+      <div className="w-full max-w-6xl rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl my-4">
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white rounded-t-2xl">
           <div>
@@ -558,35 +575,63 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
           </button>
         </div>
 
-        {/* Filtros */}
-        <div className="flex flex-wrap gap-6 px-6 py-3 border-b border-slate-100 bg-white">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider">Tabela</span>
-            <div className="flex items-center gap-2">
-              <label className={labelCls}>De</label>
-              <input type="date" value={toInput(periodoTab.ini)} onChange={e => setPeriodoTab(p => ({ ...p, ini: fromInput(e.target.value) }))} className={inputCls} />
-              <label className={labelCls}>Até</label>
-              <input type="date" value={toInput(periodoTab.fim)} onChange={e => setPeriodoTab(p => ({ ...p, fim: fromInput(e.target.value) }))} className={inputCls} />
-              {erroTab && <span className="text-xs text-rose-500">{erroTab}</span>}
-            </div>
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">Gráfico</span>
-            <div className="flex items-center gap-2">
-              <label className={labelCls}>De</label>
-              <input type="date" value={toInput(periodoGraf.ini)} onChange={e => setPeriodoGraf(p => ({ ...p, ini: fromInput(e.target.value) }))} className={inputCls} />
-              <label className={labelCls}>Até</label>
-              <input type="date" value={toInput(periodoGraf.fim)} onChange={e => setPeriodoGraf(p => ({ ...p, fim: fromInput(e.target.value) }))} className={inputCls} />
-              {erroGraf && <span className="text-xs text-rose-500">{erroGraf}</span>}
-            </div>
-          </div>
-        </div>
+        {/* Corpo em duas colunas */}
+        <div className="grid grid-cols-2 divide-x divide-slate-200">
 
-        {/* Seções */}
-        <div className="flex flex-col gap-6 p-6">
-          <Secao titulo="Linha Maiores" tipo="maiores" linhas={maiores} dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loadingTab={loadingTab} loadingGraf={loadingGraf} />
-          <Secao titulo="Linha Menores" tipo="menores" linhas={menores} dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loadingTab={loadingTab} loadingGraf={loadingGraf} />
-          <Secao titulo="OPE"           tipo="ope"     linhas={ope}     dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loadingTab={loadingTab} loadingGraf={loadingGraf} />
+          {/* ── Coluna esquerda: Tabelas ── */}
+          <div className="flex flex-col">
+            {/* Filtro tabela */}
+            <div className="flex flex-wrap items-end gap-3 px-5 py-3 border-b border-slate-100 bg-white">
+              <div className="flex flex-col gap-1 flex-1">
+                <span className="text-[10px] font-semibold text-blue-500 uppercase tracking-wider">Período — Tabela</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className={labelCls}>De</label>
+                  <input type="date" value={toInput(periodoTab.ini)} onChange={e => setPeriodoTab(p => ({ ...p, ini: fromInput(e.target.value) }))} className={inputCls} />
+                  <label className={labelCls}>Até</label>
+                  <input type="date" value={toInput(periodoTab.fim)} onChange={e => setPeriodoTab(p => ({ ...p, fim: fromInput(e.target.value) }))} className={inputCls} />
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                {erroTab && <span className="text-xs text-rose-500">{erroTab}</span>}
+                {btnAplicar(!periodoTab.ini || !periodoTab.fim || loadingTab, loadingTab, handleAplicarTab)}
+              </div>
+            </div>
+
+            {/* Tabelas */}
+            <div className="flex flex-col gap-5 p-5">
+              <TabelaCard titulo="Linha Maiores" linhas={maiores} loading={loadingTab} />
+              <TabelaCard titulo="Linha Menores" linhas={menores} loading={loadingTab} />
+              <TabelaCard titulo="OPE"           linhas={ope}     loading={loadingTab} />
+            </div>
+          </div>
+
+          {/* ── Coluna direita: Gráficos ── */}
+          <div className="flex flex-col">
+            {/* Filtro gráfico */}
+            <div className="flex flex-wrap items-end gap-3 px-5 py-3 border-b border-slate-100 bg-white">
+              <div className="flex flex-col gap-1 flex-1">
+                <span className="text-[10px] font-semibold text-indigo-500 uppercase tracking-wider">Período — Gráfico</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className={labelCls}>De</label>
+                  <input type="date" value={toInput(periodoGraf.ini)} onChange={e => setPeriodoGraf(p => ({ ...p, ini: fromInput(e.target.value) }))} className={inputCls} />
+                  <label className={labelCls}>Até</label>
+                  <input type="date" value={toInput(periodoGraf.fim)} onChange={e => setPeriodoGraf(p => ({ ...p, fim: fromInput(e.target.value) }))} className={inputCls} />
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                {erroGraf && <span className="text-xs text-rose-500">{erroGraf}</span>}
+                {btnAplicar(!periodoGraf.ini || !periodoGraf.fim || loadingGraf, loadingGraf, handleAplicarGraf)}
+              </div>
+            </div>
+
+            {/* Gráficos */}
+            <div className="flex flex-col gap-5 p-5">
+              <GraficoCard titulo="Linha Maiores" tipo="maiores" dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
+              <GraficoCard titulo="Linha Menores" tipo="menores" dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
+              <GraficoCard titulo="OPE"           tipo="ope"     dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
