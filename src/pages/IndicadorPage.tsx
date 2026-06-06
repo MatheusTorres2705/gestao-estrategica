@@ -18,6 +18,7 @@ import {
   LineChart, Line, XAxis, YAxis, ReferenceLine,
 } from 'recharts';
 import { obterReg } from '@/lib/obterReg';
+import { TarifaHorariaView } from '@/components/TarifaHorariaView';
 import { getWorkingCapitalEstoque } from '@/services/workingCapitalService';
 import type { WorkingCapitalRow, Classificacao } from '@/services/workingCapitalService';
 import { cn } from '@/lib/utils';
@@ -212,7 +213,7 @@ export default function IndicadorPage() {
 
       {/* Conteúdo específico por indicador */}
       {indicador.id === 'qualidade' && indicador.detalheExtra && <QualidadeDetalhe detalhe={indicador.detalheExtra} />}
-      {indicador.id === 'tarifa-horaria' && indicador.detalheExtra && <TarifaDetalhe detalhe={indicador.detalheExtra} />}
+      {indicador.id === 'tarifa-horaria' && <TarifaHorariaView mes={mes} ano={ano} />}
       {indicador.id === 'working-capital' && <WorkingCapitalDetalhe />}
       {indicador.id === 'seguranca' && indicador.detalheExtra && <SegurancaDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'moldes' && indicador.detalheExtra && <MoldesDetalhe detalhe={indicador.detalheExtra} />}
