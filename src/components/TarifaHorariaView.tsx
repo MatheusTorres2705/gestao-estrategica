@@ -409,8 +409,8 @@ export function TarifaHorariaView({ mes, ano }: Props) {
           </h2>
         </div>
 
-        <div className="flex gap-0">
-          <div className="flex-1 min-w-0 p-5 space-y-6 border-r border-gray-100 overflow-x-auto">
+        <div className="flex flex-col lg:flex-row gap-0">
+          <div className="flex-1 min-w-0 p-4 lg:p-5 space-y-6 lg:border-r border-gray-100 overflow-x-auto">
             {erroHoras && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">{erroHoras}</div>
             )}
@@ -444,7 +444,7 @@ export function TarifaHorariaView({ mes, ano }: Props) {
             />
           </div>
 
-          <div className="w-60 shrink-0 p-4 space-y-4">
+          <div className="w-full border-t border-gray-100 lg:border-t-0 lg:w-60 lg:shrink-0 p-4 space-y-4">
             <div>
               <p className="text-[11px] font-semibold text-slate-600 mb-2">Tarifa Horária</p>
               <ResponsiveContainer width="100%" height={160}>

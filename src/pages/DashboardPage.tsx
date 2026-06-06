@@ -41,19 +41,21 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-4 lg:p-6 space-y-5">
       {/* Page title */}
-      <div className="flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
-          <Target className="h-5 w-5 text-white" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-gray-900">Metas e Indicadores</h1>
-          <p className="text-sm text-gray-500">{fmtMesFull(mes)} / {ano} — Resultados da Fábrica</p>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 shrink-0">
+            <Target className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">Metas e Indicadores</h1>
+            <p className="text-sm text-gray-500">{fmtMesFull(mes)} / {ano} — Resultados da Fábrica</p>
+          </div>
         </div>
 
         {/* Pills de resumo */}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
           {(Object.entries(counts) as [keyof typeof counts, number][]).map(([key, count]) => (
             <span
               key={key}

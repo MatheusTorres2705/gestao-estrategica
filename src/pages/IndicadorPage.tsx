@@ -129,7 +129,7 @@ export default function IndicadorPage() {
   const Icon = ICONS[indicador.icone] ?? BarChart3;
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl">
+    <div className="p-4 lg:p-6 space-y-5 max-w-7xl">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-400">
         <Link to="/dashboard" className="hover:text-gray-600 transition-colors">Metas e Indicadores</Link>

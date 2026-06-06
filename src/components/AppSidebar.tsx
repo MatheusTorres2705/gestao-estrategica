@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, ShieldCheck, Award, DollarSign, Factory,
-  Layers, Package, BarChart3, ClipboardList, LogOut, ChevronRight,
+  Layers, Package, BarChart3, ClipboardList, LogOut, ChevronRight, X,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthProvider';
 import { cn } from '@/lib/utils';
@@ -18,7 +18,9 @@ const NAV_ITEMS = [
   { to: '/indicadores/working-capital', label: 'Working Capital', icon: BarChart3 },
 ];
 
-export function AppSidebar() {
+type Props = { open: boolean; onClose: () => void };
+
+export function AppSidebar({ open, onClose }: Props) {
   const { user, logout } = useAuth();
   const nav = useNavigate();
 
@@ -28,9 +30,21 @@ export function AppSidebar() {
   };
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col bg-white border-r border-gray-200 shadow-sm">
+    <aside className={cn(
+      'fixed inset-y-0 left-0 z-30 flex w-60 flex-col bg-white border-r border-gray-200 shadow-sm',
+      'transform transition-transform duration-200 ease-in-out',
+      'lg:translate-x-0',
+      open ? 'translate-x-0' : '-translate-x-full',
+    )}>
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+        {/* Botão fechar — visível só em mobile */}
+        <button
+          onClick={onClose}
+          className="lg:hidden absolute right-3 top-3 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
         <img src={nxBoatsLogo} alt="NX Boats" className="h-8 w-auto" />
         <div>
           <p className="text-xs font-semibold text-gray-800 leading-tight">Gestão Estratégica</p>
@@ -47,6 +61,7 @@ export function AppSidebar() {
           <NavLink
             key={to}
             to={to}
+            onClick={onClose}
             className={({ isActive }) =>
               cn(
                 'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-150',
@@ -69,6 +84,7 @@ export function AppSidebar() {
         <div className="border-t border-gray-100 pt-3 mt-3">
           <NavLink
             to="/planos-acao"
+            onClick={onClose}
             className={({ isActive }) =>
               cn(
                 'group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-150',

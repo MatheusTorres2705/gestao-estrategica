@@ -575,8 +575,8 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
           </button>
         </div>
 
-        {/* Corpo em duas colunas */}
-        <div className="grid grid-cols-2 divide-x divide-slate-200">
+        {/* Corpo: empilha em mobile, lado a lado em md+ */}
+        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200">
 
           {/* ── Coluna esquerda: Tabelas ── */}
           <div className="flex flex-col">
