@@ -198,6 +198,33 @@ export const mockIndicadores: Indicador[] = [
     },
   },
   {
+    id: 'tlc',
+    nome: 'TLC — Total Landed Cost',
+    icone: 'Globe',
+    status: 'em-risco',
+    resumo: 'R$ 48.200/un — meta R$ 45.000/un',
+    metricas: [
+      { id: 'tlc-unit', label: 'TLC por Embarcação', valor: 48200, meta: 45000, unidade: 'R$/un', polaridade: 'menor', status: 'nao-atingido', variacao: 7.1, responsavel: 'Supply Chain' },
+      { id: 'frete', label: 'Custo de Frete', valor: 3850, meta: 3200, unidade: 'R$/un', polaridade: 'menor', status: 'nao-atingido', variacao: 20.3, responsavel: 'Supply Chain' },
+      { id: 'impostos', label: 'Impostos e Taxas de Importação', valor: 6100, meta: 5800, unidade: 'R$/un', polaridade: 'menor', status: 'em-risco', variacao: 5.2, responsavel: 'Supply Chain' },
+      { id: 'lead-time', label: 'Lead Time Médio', valor: 42, meta: 35, unidade: 'dias', polaridade: 'menor', status: 'nao-atingido', variacao: 20, responsavel: 'Supply Chain' },
+    ],
+    tendencia: [
+      { mes: 'Nov', valor: 44800, meta: 45000 },
+      { mes: 'Dez', valor: 45300, meta: 45000 },
+      { mes: 'Jan', valor: 46100, meta: 45000 },
+      { mes: 'Fev', valor: 46800, meta: 45000 },
+      { mes: 'Mar', valor: 47500, meta: 45000 },
+      { mes: 'Jun', valor: 48200, meta: 45000 },
+    ],
+    subIndicadores: [
+      { label: 'Matéria-Prima', valor: 31250, unidade: 'R$', cor: '#2563EB' },
+      { label: 'Frete', valor: 3850, unidade: 'R$', cor: '#7C3AED' },
+      { label: 'Impostos', valor: 6100, unidade: 'R$', cor: '#D97706' },
+      { label: 'Outros', valor: 7000, unidade: 'R$', cor: '#64748b' },
+    ],
+  },
+  {
     id: 'working-capital',
     nome: 'Working Capital',
     icone: 'BarChart3',

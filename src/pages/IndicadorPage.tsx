@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useOutletContext, useNavigate, Link } from 'react-router-dom';
 import {
   ChevronLeft, Plus, TrendingUp, TrendingDown, Minus,
-  Target, ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3,
+  Target, ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3, Globe,
   Fish, ChevronRight, Calendar, User, X, AlertCircle, MoreHorizontal, Pencil, Trash2,
 } from 'lucide-react';
 import { TrendChart } from '@/components/TrendChart';
@@ -19,6 +19,7 @@ import {
 } from 'recharts';
 import { obterReg } from '@/lib/obterReg';
 import { TarifaHorariaView } from '@/components/TarifaHorariaView';
+import { TLCView } from '@/components/TLCView';
 import { getWorkingCapitalEstoque } from '@/services/workingCapitalService';
 import type { WorkingCapitalRow, Classificacao } from '@/services/workingCapitalService';
 import { cn } from '@/lib/utils';
@@ -26,7 +27,7 @@ import { cn } from '@/lib/utils';
 type OutletCtx = { mes: number; ano: number };
 
 const ICONS: Record<string, React.ElementType> = {
-  ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3,
+  ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3, Globe,
 };
 
 
@@ -214,6 +215,7 @@ export default function IndicadorPage() {
       {/* Conteúdo específico por indicador */}
       {indicador.id === 'qualidade' && indicador.detalheExtra && <QualidadeDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'tarifa-horaria' && <TarifaHorariaView mes={mes} ano={ano} />}
+      {indicador.id === 'tlc' && <TLCView mes={mes} ano={ano} />}
       {indicador.id === 'working-capital' && <WorkingCapitalDetalhe />}
       {indicador.id === 'seguranca' && indicador.detalheExtra && <SegurancaDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'moldes' && indicador.detalheExtra && <MoldesDetalhe detalhe={indicador.detalheExtra} />}

@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, ShieldCheck, Award, DollarSign, Factory,
-  Layers, Package, BarChart3, ClipboardList, LogOut, ChevronRight, X,
+  Layers, Package, BarChart3, ClipboardList, LogOut, ChevronRight, X, Globe,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthProvider';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/indicadores/moldes', label: 'Moldes', icon: Layers },
   { to: '/indicadores/pcm', label: 'PCM', icon: Package },
   { to: '/indicadores/working-capital', label: 'Working Capital', icon: BarChart3 },
+  { to: '/indicadores/tlc', label: 'TLC', icon: Globe },
 ];
 
 type Props = { open: boolean; onClose: () => void };
