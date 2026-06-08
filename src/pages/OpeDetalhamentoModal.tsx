@@ -59,10 +59,10 @@ function classifyDept(setorMacro: string): DeptKey | null {
 }
 
 /* ── Tipos de linha bruta ──────────────────────────────────── */
-type RawAtivRow  = { linha: string; data: string; setorMacro: string; horas: number; qtdAtiv: number };
+type RawAtivRow  = { linha: string; data: string; setorMacro: string; horas: number; qtdAtiv: number; horasRetrabalho: number; qtdRetrabalho: number };
 type RawPontoRow = { linha: string; data: string; setorMacro: string; qtdPonto: number; horasPonto: number };
 type DailyPoint  = { data: string; ope: number };
-type AggRow      = { label: string; horas: number; horasReg: number; qtdAtiv: number; qtdPonto: number };
+type AggRow      = { label: string; horas: number; horasReg: number; qtdAtiv: number; qtdPonto: number; horasRetrabalho: number; qtdRetrabalho: number };
 
 /* ── Opções de seleção dos gráficos ────────────────────────── */
 const OPCOES_SETOR_GRAF = [
@@ -90,20 +90,22 @@ const FILTRO_BASE: Record<string, (l: string) => boolean> = {
 
 /* ── Agregação ─────────────────────────────────────────────── */
 function agregar(ativos: RawAtivRow[], pontos: RawPontoRow[], filtroLinha: (l: string) => boolean): AggRow[] {
-  const acc: Record<DeptKey, { horas: number; qtdAtiv: number; horasPonto: number; qtdPonto: number }> = {
-    Acab: {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0},
-    Mont: {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0},
-    Marc: {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0},
-    Ele:  {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0},
-    Lam:  {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0},
-    Reb:  {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0},
+  const acc: Record<DeptKey, { horas: number; qtdAtiv: number; horasPonto: number; qtdPonto: number; horasRetrabalho: number; qtdRetrabalho: number }> = {
+    Acab: {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0,horasRetrabalho:0,qtdRetrabalho:0},
+    Mont: {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0,horasRetrabalho:0,qtdRetrabalho:0},
+    Marc: {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0,horasRetrabalho:0,qtdRetrabalho:0},
+    Ele:  {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0,horasRetrabalho:0,qtdRetrabalho:0},
+    Lam:  {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0,horasRetrabalho:0,qtdRetrabalho:0},
+    Reb:  {horas:0,qtdAtiv:0,horasPonto:0,qtdPonto:0,horasRetrabalho:0,qtdRetrabalho:0},
   };
   for (const r of ativos) {
     if (!filtroLinha(r.linha)) continue;
     const key = classifyDept(r.setorMacro);
     if (!key) continue;
-    acc[key].horas   += r.horas;
-    acc[key].qtdAtiv += r.qtdAtiv;
+    acc[key].horas           += r.horas;
+    acc[key].qtdAtiv         += r.qtdAtiv;
+    acc[key].horasRetrabalho += r.horasRetrabalho;
+    acc[key].qtdRetrabalho   += r.qtdRetrabalho;
   }
   for (const p of pontos) {
     if (!filtroLinha(p.linha)) continue;
@@ -113,11 +115,13 @@ function agregar(ativos: RawAtivRow[], pontos: RawPontoRow[], filtroLinha: (l: s
     acc[key].qtdPonto   += p.qtdPonto;
   }
   return DEPT_KEYS.map(k => ({
-    label:    DEPT_LABELS[k],
-    horas:    acc[k].horas,
-    horasReg: acc[k].horasPonto,
-    qtdAtiv:  acc[k].qtdAtiv,
-    qtdPonto: acc[k].qtdPonto,
+    label:           DEPT_LABELS[k],
+    horas:           acc[k].horas,
+    horasReg:        acc[k].horasPonto,
+    qtdAtiv:         acc[k].qtdAtiv,
+    qtdPonto:        acc[k].qtdPonto,
+    horasRetrabalho: acc[k].horasRetrabalho,
+    qtdRetrabalho:   acc[k].qtdRetrabalho,
   }));
 }
 
@@ -133,10 +137,12 @@ function agregarOpe(ativos: RawAtivRow[], pontos: RawPontoRow[]): AggRow[] {
     const subPonto = pontos.filter(r => fn(r.linha));
     return {
       label,
-      horas:    subAtiv.reduce((s, r)  => s + r.horas,      0),
-      horasReg: subPonto.reduce((s, r) => s + r.horasPonto, 0),
-      qtdAtiv:  subAtiv.reduce((s, r)  => s + r.qtdAtiv,    0),
-      qtdPonto: subPonto.reduce((s, r) => s + r.qtdPonto,   0),
+      horas:           subAtiv.reduce((s, r)  => s + r.horas,           0),
+      horasReg:        subPonto.reduce((s, r) => s + r.horasPonto,      0),
+      qtdAtiv:         subAtiv.reduce((s, r)  => s + r.qtdAtiv,         0),
+      qtdPonto:        subPonto.reduce((s, r) => s + r.qtdPonto,        0),
+      horasRetrabalho: subAtiv.reduce((s, r)  => s + r.horasRetrabalho, 0),
+      qtdRetrabalho:   subAtiv.reduce((s, r)  => s + r.qtdRetrabalho,   0),
     };
   });
 }
@@ -198,10 +204,12 @@ TAB_BASE AS (
     COMP.QTD                        AS DURACAO,
     COMP.FEITO                      AS STATUS,
     APO.DATA                        AS DATA_EXECUCAO,
+    COMP.RETRABALHO,
     ROW_NUMBER() OVER (
       PARTITION BY
         COMP.SEQ, PRJ.CODPROJPAI, SUBSTR(PRJ.IDENTIFICACAO, 1, 5), PRJ.IDENTIFICACAO,
-        COMP.CODUSU, USU.NOMEUSU, COMP.CODPRODSP, PRO.DESCRPROD, COMP.QTD, COMP.FEITO, APO.DATA
+        COMP.CODUSU, USU.NOMEUSU, COMP.CODPRODSP, PRO.DESCRPROD, COMP.QTD, COMP.FEITO, APO.DATA,
+        COMP.RETRABALHO
       ORDER BY
         (SELECT COUNT(*) FROM AD_DEPLINHA X WHERE X.CODDEP = TAB_DEP.CODDEP) ASC,
         TAB_DEP.CODDEP ASC
@@ -216,8 +224,7 @@ TAB_BASE AS (
     LEFT JOIN TAB_DEP
       ON TAB_DEP.AD_CODUSU  = COMP.CODUSU
      AND TAB_DEP.CODPROJPAI = PRJ.CODPROJPAI
-  WHERE COMP.RETRABALHO IS NULL
-    AND APO.DATA IS NOT NULL
+  WHERE APO.DATA IS NOT NULL
 ),
 SETOR_MACRO AS (
   SELECT DISTINCT DEP.AD_CODUSU, DEPL.SETORMACRO
@@ -230,8 +237,10 @@ SELECT
   TB.LINHA,
   TO_CHAR(TB.DATA_EXECUCAO, 'DD/MM/YYYY') AS DATA,
   SM.SETORMACRO,
-  COUNT(*)                        AS QTD_REGISTROS,
-  ROUND(SUM(TB.DURACAO) / 60, 2) AS HORAS
+  COUNT(CASE WHEN TB.RETRABALHO IS NULL     THEN 1 END)                                    AS QTD_REGISTROS,
+  ROUND(SUM(CASE WHEN TB.RETRABALHO IS NULL     THEN TB.DURACAO ELSE 0 END) / 60, 2)      AS HORAS,
+  COUNT(CASE WHEN TB.RETRABALHO IS NOT NULL THEN 1 END)                                    AS QTD_RETRABALHO,
+  ROUND(SUM(CASE WHEN TB.RETRABALHO IS NOT NULL THEN TB.DURACAO ELSE 0 END) / 60, 2)      AS HORAS_RETRABALHO
 FROM TAB_BASE TB
   JOIN SETOR_MACRO SM ON SM.AD_CODUSU = TB.COD_SETOR
 WHERE TB.RN = 1
@@ -276,11 +285,13 @@ ORDER BY LINHA, DATA, SETORMACRO
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapAtiv(r: Record<string, any>): RawAtivRow {
   return {
-    linha:      String(r['LINHA']         ?? r['linha']         ?? ''),
-    data:       String(r['DATA']          ?? r['data']          ?? ''),
-    setorMacro: String(r['SETORMACRO']    ?? r['setormacro']    ?? ''),
-    horas:      Number(r['HORAS']         ?? r['horas']         ?? 0),
-    qtdAtiv:    Number(r['QTD_REGISTROS'] ?? r['qtd_registros'] ?? 0),
+    linha:           String(r['LINHA']            ?? r['linha']            ?? ''),
+    data:            String(r['DATA']             ?? r['data']             ?? ''),
+    setorMacro:      String(r['SETORMACRO']       ?? r['setormacro']       ?? ''),
+    horas:           Number(r['HORAS']            ?? r['horas']            ?? 0),
+    qtdAtiv:         Number(r['QTD_REGISTROS']    ?? r['qtd_registros']    ?? 0),
+    horasRetrabalho: Number(r['HORAS_RETRABALHO'] ?? r['horas_retrabalho'] ?? 0),
+    qtdRetrabalho:   Number(r['QTD_RETRABALHO']   ?? r['qtd_retrabalho']   ?? 0),
   };
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -355,12 +366,15 @@ function TabelaCard({ titulo, linhas, loading }: {
   linhas: AggRow[];
   loading: boolean;
 }) {
-  const totAtivQtd  = linhas.reduce((s, l) => s + l.qtdAtiv,  0);
-  const totAtivH    = linhas.reduce((s, l) => s + l.horas,    0);
-  const totPontoQtd = linhas.reduce((s, l) => s + l.qtdPonto, 0);
-  const totPontoH   = linhas.reduce((s, l) => s + l.horasReg, 0);
+  const totAtivQtd     = linhas.reduce((s, l) => s + l.qtdAtiv,         0);
+  const totAtivH       = linhas.reduce((s, l) => s + l.horas,           0);
+  const totRetrabQtd   = linhas.reduce((s, l) => s + l.qtdRetrabalho,   0);
+  const totRetrabH     = linhas.reduce((s, l) => s + l.horasRetrabalho, 0);
+  const totPontoQtd    = linhas.reduce((s, l) => s + l.qtdPonto,        0);
+  const totPontoH      = linhas.reduce((s, l) => s + l.horasReg,        0);
   const ratio = (a: number, b: number) => b > 0 ? `${(a / b * 100).toFixed(1)}%` : '—';
-  const col = 'grid-cols-[90px_46px_66px_46px_66px_52px]';
+  const hasRetrab = (v: number) => v > 0;
+  const col = 'grid-cols-[90px_46px_66px_46px_66px_46px_66px_52px]';
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -369,6 +383,7 @@ function TabelaCard({ titulo, linhas, loading }: {
         <div className={`grid ${col} px-3 pt-2 pb-0`}>
           <span />
           <span className="text-[9px] font-bold text-blue-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-blue-200">Atividades</span>
+          <span className="text-[9px] font-bold text-orange-400 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-orange-200">Retrabalho</span>
           <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-emerald-200">Ponto</span>
           <span />
         </div>
@@ -376,6 +391,8 @@ function TabelaCard({ titulo, linhas, loading }: {
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Setor</span>
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
+          <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-wide text-right">Reg.</span>
+          <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-wide text-right">Horas</span>
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
           <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wide text-right">OPE</span>
@@ -387,6 +404,8 @@ function TabelaCard({ titulo, linhas, loading }: {
             <span className="text-xs text-slate-700 truncate">{l.label}</span>
             <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdAtiv}</span>
             <span className="text-xs font-semibold text-blue-600 text-right tabular-nums">{l.horas.toFixed(2)}</span>
+            <span className="text-xs text-orange-400 text-right tabular-nums">{hasRetrab(l.qtdRetrabalho) ? l.qtdRetrabalho : '—'}</span>
+            <span className="text-xs font-semibold text-orange-500 text-right tabular-nums">{hasRetrab(l.horasRetrabalho) ? l.horasRetrabalho.toFixed(2) : '—'}</span>
             <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdPonto}</span>
             <span className="text-xs font-semibold text-emerald-600 text-right tabular-nums">{l.horasReg.toFixed(2)}</span>
             <span className="text-xs font-semibold text-indigo-500 text-right tabular-nums">{ratio(l.horas, l.horasReg)}</span>
@@ -397,6 +416,8 @@ function TabelaCard({ titulo, linhas, loading }: {
             <span className="text-xs font-bold text-slate-600">Total</span>
             <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totAtivQtd}</span>
             <span className="text-xs font-bold text-blue-700 text-right tabular-nums">{totAtivH.toFixed(2)}</span>
+            <span className="text-xs font-bold text-orange-500 text-right tabular-nums">{hasRetrab(totRetrabQtd) ? totRetrabQtd : '—'}</span>
+            <span className="text-xs font-bold text-orange-600 text-right tabular-nums">{hasRetrab(totRetrabH) ? totRetrabH.toFixed(2) : '—'}</span>
             <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totPontoQtd}</span>
             <span className="text-xs font-bold text-emerald-700 text-right tabular-nums">{totPontoH.toFixed(2)}</span>
             <span className="text-xs font-bold text-indigo-600 text-right tabular-nums">{ratio(totAtivH, totPontoH)}</span>
