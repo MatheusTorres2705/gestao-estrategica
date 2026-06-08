@@ -366,61 +366,51 @@ function TabelaCard({ titulo, linhas, loading }: {
   linhas: AggRow[];
   loading: boolean;
 }) {
-  const totAtivQtd     = linhas.reduce((s, l) => s + l.qtdAtiv,         0);
-  const totAtivH       = linhas.reduce((s, l) => s + l.horas,           0);
-  const totRetrabQtd   = linhas.reduce((s, l) => s + l.qtdRetrabalho,   0);
-  const totRetrabH     = linhas.reduce((s, l) => s + l.horasRetrabalho, 0);
-  const totPontoQtd    = linhas.reduce((s, l) => s + l.qtdPonto,        0);
-  const totPontoH      = linhas.reduce((s, l) => s + l.horasReg,        0);
-  const ratio = (a: number, b: number) => b > 0 ? `${(a / b * 100).toFixed(1)}%` : '—';
-  const hasRetrab = (v: number) => v > 0;
-  const col = 'grid-cols-[90px_46px_66px_46px_66px_46px_66px_52px]';
+  const totAtivH   = linhas.reduce((s, l) => s + l.horas,           0);
+  const totRetrabH = linhas.reduce((s, l) => s + l.horasRetrabalho, 0);
+  const totPontoH  = linhas.reduce((s, l) => s + l.horasReg,        0);
+  const ratio    = (a: number, b: number) => b > 0 ? `${(a / b * 100).toFixed(1)}%` : '—';
+  const hasLoss  = (v: number) => v > 0;
+  const fmtPend  = (v: number) => v === 0 ? '0,00' : (v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2));
+  const pendCls  = (v: number) => v === 0 ? 'text-slate-400' : 'text-rose-500';
+  const col = 'grid-cols-[1fr_68px_68px_68px_68px_50px] gap-x-3';
 
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{titulo}</span>
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className={`grid ${col} px-3 pt-2 pb-0`}>
-          <span />
-          <span className="text-[9px] font-bold text-blue-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-blue-200">Atividades</span>
-          <span className="text-[9px] font-bold text-orange-400 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-orange-200">Retrabalho</span>
-          <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider text-center col-span-2 pb-0.5 border-b-2 border-emerald-200">Ponto</span>
-          <span />
-        </div>
+        {/* cabeçalho único com grupos */}
         <div className={`grid ${col} px-3 py-1 border-b border-slate-100 bg-slate-50`}>
           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Setor</span>
-          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
-          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
-          <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-wide text-right">Reg.</span>
-          <span className="text-[10px] font-semibold text-orange-400 uppercase tracking-wide text-right">Horas</span>
-          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Reg.</span>
-          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-right">Horas</span>
-          <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wide text-right">OPE</span>
+          <span className="text-[9px] font-bold text-emerald-500 uppercase tracking-wider text-right pb-0.5 border-b-2 border-emerald-200">Ponto</span>
+          <span className="text-[9px] font-bold text-blue-500    uppercase tracking-wider text-right pb-0.5 border-b-2 border-blue-200">Atividades</span>
+          <span className="text-[9px] font-bold text-orange-400  uppercase tracking-wider text-right pb-0.5 border-b-2 border-orange-200">Perdas</span>
+          <span className="text-[9px] font-bold text-rose-500    uppercase tracking-wider text-right pb-0.5 border-b-2 border-rose-200">Pendências</span>
+          <span className="text-[10px] font-semibold text-slate-700 uppercase tracking-wide text-right">OPE</span>
         </div>
         {loading ? (
           <p className="px-3 py-3 text-xs text-slate-300">Carregando...</p>
-        ) : linhas.map(l => (
-          <div key={l.label} className={`grid ${col} px-3 py-1.5 border-b border-slate-50 last:border-0`}>
-            <span className="text-xs text-slate-700 truncate">{l.label}</span>
-            <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdAtiv}</span>
-            <span className="text-xs font-semibold text-blue-600 text-right tabular-nums">{l.horas.toFixed(2)}</span>
-            <span className="text-xs text-orange-400 text-right tabular-nums">{hasRetrab(l.qtdRetrabalho) ? l.qtdRetrabalho : '—'}</span>
-            <span className="text-xs font-semibold text-orange-500 text-right tabular-nums">{hasRetrab(l.horasRetrabalho) ? l.horasRetrabalho.toFixed(2) : '—'}</span>
-            <span className="text-xs text-slate-400 text-right tabular-nums">{l.qtdPonto}</span>
-            <span className="text-xs font-semibold text-emerald-600 text-right tabular-nums">{l.horasReg.toFixed(2)}</span>
-            <span className="text-xs font-semibold text-indigo-500 text-right tabular-nums">{ratio(l.horas, l.horasReg)}</span>
-          </div>
-        ))}
+        ) : linhas.map(l => {
+          const pend = l.horasReg - l.horas - l.horasRetrabalho;
+          return (
+            <div key={l.label} className={`grid ${col} px-3 py-1.5 border-b border-slate-50 last:border-0`}>
+              <span className="text-xs text-slate-700 truncate">{l.label}</span>
+              <span className="text-xs font-semibold text-emerald-600 text-right tabular-nums">{l.horasReg.toFixed(2)}</span>
+              <span className="text-xs font-semibold text-blue-600    text-right tabular-nums">{l.horas.toFixed(2)}</span>
+              <span className="text-xs font-semibold text-orange-500  text-right tabular-nums">{hasLoss(l.horasRetrabalho) ? l.horasRetrabalho.toFixed(2) : '—'}</span>
+              <span className={`text-xs font-semibold text-right tabular-nums ${pendCls(pend)}`}>{fmtPend(pend)}</span>
+              <span className="text-xs font-semibold text-slate-900  text-right tabular-nums">{ratio(l.horas, l.horasReg)}</span>
+            </div>
+          );
+        })}
         {!loading && (
           <div className={`grid ${col} px-3 py-1.5 border-t border-slate-200 bg-slate-50`}>
             <span className="text-xs font-bold text-slate-600">Total</span>
-            <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totAtivQtd}</span>
-            <span className="text-xs font-bold text-blue-700 text-right tabular-nums">{totAtivH.toFixed(2)}</span>
-            <span className="text-xs font-bold text-orange-500 text-right tabular-nums">{hasRetrab(totRetrabQtd) ? totRetrabQtd : '—'}</span>
-            <span className="text-xs font-bold text-orange-600 text-right tabular-nums">{hasRetrab(totRetrabH) ? totRetrabH.toFixed(2) : '—'}</span>
-            <span className="text-xs font-bold text-slate-500 text-right tabular-nums">{totPontoQtd}</span>
             <span className="text-xs font-bold text-emerald-700 text-right tabular-nums">{totPontoH.toFixed(2)}</span>
-            <span className="text-xs font-bold text-indigo-600 text-right tabular-nums">{ratio(totAtivH, totPontoH)}</span>
+            <span className="text-xs font-bold text-blue-700    text-right tabular-nums">{totAtivH.toFixed(2)}</span>
+            <span className="text-xs font-bold text-orange-600  text-right tabular-nums">{hasLoss(totRetrabH) ? totRetrabH.toFixed(2) : '—'}</span>
+            <span className={`text-xs font-bold text-right tabular-nums ${pendCls(totPontoH - totAtivH - totRetrabH)}`}>{fmtPend(totPontoH - totAtivH - totRetrabH)}</span>
+            <span className="text-xs font-bold text-slate-900  text-right tabular-nums">{ratio(totAtivH, totPontoH)}</span>
           </div>
         )}
       </div>
