@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import {
   ClipboardList, Plus, Search, CheckCircle2, Clock, TrendingUp,
-  AlertCircle, Calendar, User, Filter,
+  AlertCircle, Calendar, User, Filter, MoreVertical, Pencil, Trash2,
 } from 'lucide-react';
-import { getPlanosAcao, updatePlanoStatus } from '@/services/planosAcaoService';
+import { getPlanosAcao, updatePlanoStatus, deletePlanoAcao } from '@/services/planosAcaoService';
 import type { PlanoAcao, PlanoStatus } from '@/types';
 import { mockIndicadores } from '@/data/mockIndicadores';
 import { Progress } from '@/components/ui/progress';
@@ -67,13 +67,30 @@ function KanbanCard({
   plano,
   onDragStart,
   isDragging,
+  onEdit,
+  onDelete,
 }: {
   plano: PlanoAcao;
   onDragStart: () => void;
   isDragging: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const today = new Date().toISOString().split('T')[0];
   const isOverdue = plano.prazo < today && plano.status !== 'concluido';
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handler(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   return (
     <div
@@ -85,12 +102,40 @@ function KanbanCard({
         ${isDragging ? 'opacity-40 scale-95' : 'opacity-100'}
       `}
     >
-      {/* Top: indicator badge */}
+      {/* Top: indicator badge + menu */}
       <div className="flex items-center justify-between gap-2">
         <IndBadge indicadorId={plano.indicadorId} />
-        {plano.status === 'concluido' && (
-          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-        )}
+        <div className="flex items-center gap-1">
+          {plano.status === 'concluido' && (
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+          )}
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+              className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-6 z-20 w-32 rounded-lg border border-gray-200 bg-white shadow-md py-1">
+                <button
+                  onClick={() => { setMenuOpen(false); onEdit(); }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <Pencil className="h-3 w-3 text-gray-400" />
+                  Editar
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(false); onDelete(); }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Excluir
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Action text */}
@@ -139,6 +184,8 @@ function KanbanColumn({
   onCardDragStart,
   onDrop,
   onAddClick,
+  onEditCard,
+  onDeleteCard,
 }: {
   col: typeof COLS[number];
   cards: PlanoAcao[];
@@ -146,6 +193,8 @@ function KanbanColumn({
   onCardDragStart: (id: string) => void;
   onDrop: (status: PlanoStatus) => void;
   onAddClick: () => void;
+  onEditCard: (plano: PlanoAcao) => void;
+  onDeleteCard: (plano: PlanoAcao) => void;
 }) {
   const [isOver, setIsOver] = useState(false);
   const Icon = col.icon;
@@ -190,6 +239,8 @@ function KanbanColumn({
             plano={p}
             isDragging={draggingId === p.id}
             onDragStart={() => onCardDragStart(p.id)}
+            onEdit={() => onEditCard(p)}
+            onDelete={() => onDeleteCard(p)}
           />
         ))}
       </div>
@@ -214,6 +265,9 @@ export default function PlanosAcaoPage() {
   const [search, setSearch] = useState('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [editTarget, setEditTarget] = useState<PlanoAcao | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PlanoAcao | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const dragRef = useRef<string | null>(null);
 
   const load = () => getPlanosAcao().then(setPlanos);
@@ -240,6 +294,18 @@ export default function PlanosAcaoPage() {
     setDraggingId(null);
     dragRef.current = null;
     load();
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deletePlanoAcao(deleteTarget.id);
+      setDeleteTarget(null);
+      load();
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const total = planos.length;
@@ -303,6 +369,8 @@ export default function PlanosAcaoPage() {
               onCardDragStart={(id) => { dragRef.current = id; setDraggingId(id); }}
               onDrop={handleDrop}
               onAddClick={() => setShowModal(true)}
+              onEditCard={setEditTarget}
+              onDeleteCard={setDeleteTarget}
             />
           ))}
         </div>
@@ -313,6 +381,49 @@ export default function PlanosAcaoPage() {
           onClose={() => setShowModal(false)}
           onSaved={() => { load(); setShowModal(false); }}
         />
+      )}
+
+      {editTarget && (
+        <NovoPlanModal
+          plano={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => { load(); setEditTarget(null); }}
+        />
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-50 border border-red-200">
+                <Trash2 className="h-5 w-5 text-red-500" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Excluir plano de ação</p>
+                <p className="text-xs text-gray-500 mt-0.5">Esta ação não pode ser desfeita.</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 bg-gray-50 rounded-xl px-3 py-2 leading-snug">
+              {deleteTarget.acao}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 transition-colors disabled:opacity-60"
+              >
+                {deleting ? 'Excluindo…' : 'Excluir'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

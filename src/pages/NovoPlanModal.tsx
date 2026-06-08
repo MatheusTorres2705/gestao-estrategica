@@ -3,8 +3,9 @@ import { GitBranch } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { savePlanoAcao } from '@/services/planosAcaoService';
+import { savePlanoAcao, updatePlanoAcao } from '@/services/planosAcaoService';
 import { mockIndicadores } from '@/data/mockIndicadores';
+import type { PlanoAcao } from '@/types';
 
 type Props = {
   onClose: () => void;
@@ -13,6 +14,7 @@ type Props = {
   causaDefault?: string;
   causaId?: string;
   analiseId?: string;
+  plano?: PlanoAcao;
 };
 
 export function NovoPlanModal({
@@ -22,18 +24,21 @@ export function NovoPlanModal({
   causaDefault = '',
   causaId,
   analiseId,
+  plano,
 }: Props) {
-  const [acao, setAcao] = useState('');
-  const [responsavel, setResponsavel] = useState('');
-  const [area, setArea] = useState('');
+  const editMode = Boolean(plano);
+
+  const [acao, setAcao] = useState(plano?.acao ?? '');
+  const [responsavel, setResponsavel] = useState(plano?.responsavel ?? '');
+  const [area, setArea] = useState(plano?.area ?? '');
   const [causa] = useState(causaDefault);
-  const [indicadorId, setIndicadorId] = useState(indIdProp ?? '');
-  const [prazo, setPrazo] = useState('');
+  const [indicadorId, setIndicadorId] = useState(plano?.indicadorId ?? indIdProp ?? '');
+  const [prazo, setPrazo] = useState(plano?.prazo ?? '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   // When opened from Ishikawa, indicador and causa are fixed
-  const fromIshikawa = Boolean(causaId);
+  const fromIshikawa = Boolean(causaId) && !editMode;
   const indicadorNome = mockIndicadores.find((i) => i.id === indicadorId)?.nome;
 
   const handleSave = async () => {
@@ -43,11 +48,15 @@ export function NovoPlanModal({
     }
     setSaving(true);
     try {
-      await savePlanoAcao({
-        acao, responsavel, area, causa, indicadorId, prazo,
-        causaId, analiseId,
-        status: 'pendente', progresso: 0,
-      });
+      if (editMode && plano) {
+        await updatePlanoAcao(plano.id, { acao, responsavel, area, prazo, indicadorId });
+      } else {
+        await savePlanoAcao({
+          acao, responsavel, area, causa, indicadorId, prazo,
+          causaId, analiseId,
+          status: 'pendente', progresso: 0,
+        });
+      }
       onSaved();
     } catch {
       setErr('Erro ao salvar plano.');
@@ -60,7 +69,7 @@ export function NovoPlanModal({
     <Dialog open onOpenChange={() => onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Novo Plano de Ação</DialogTitle>
+          <DialogTitle>{editMode ? 'Editar Plano de Ação' : 'Novo Plano de Ação'}</DialogTitle>
         </DialogHeader>
 
         <div className="px-6 space-y-4">
@@ -137,7 +146,7 @@ export function NovoPlanModal({
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? 'Salvando…' : 'Criar Plano'}
+            {saving ? 'Salvando…' : editMode ? 'Salvar Alterações' : 'Criar Plano'}
           </Button>
         </DialogFooter>
       </DialogContent>

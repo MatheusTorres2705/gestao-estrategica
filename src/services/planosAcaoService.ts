@@ -146,3 +146,50 @@ export async function updatePlanoStatus(
     },
   });
 }
+
+export async function updatePlanoAcao(
+  id: string,
+  data: Pick<PlanoAcao, 'acao' | 'responsavel' | 'area' | 'prazo' | 'indicadorId'>,
+): Promise<void> {
+  const rows = await obterReg<RawPlano>(
+    `SELECT CODPLANO, CODCAUSA, CODISH FROM AD_ISHPLANO WHERE CODPLANO = ${Number(id)}`,
+    { pageSize: 1, maxPages: 1 },
+  );
+  if (!rows[0]) return;
+
+  await api.post('/api/sankhya/dataset/save', {
+    entity: 'AD_ISHPLANO',
+    pk: {
+      CODPLANO: Number(rows[0]['CODPLANO']),
+      CODCAUSA: Number(rows[0]['CODCAUSA']),
+      CODISH:   Number(rows[0]['CODISH']),
+    },
+    fields: ['CODPLANO', 'CODCAUSA', 'CODISH', 'ACAO', 'RESPONSAVEL', 'AREA', 'DTPRAZO'],
+    values: {
+      0: Number(rows[0]['CODPLANO']),
+      1: Number(rows[0]['CODCAUSA']),
+      2: Number(rows[0]['CODISH']),
+      3: data.acao,
+      4: data.responsavel,
+      5: data.area,
+      6: toSankhyaDate(data.prazo),
+    },
+  });
+}
+
+export async function deletePlanoAcao(id: string): Promise<void> {
+  const rows = await obterReg<RawPlano>(
+    `SELECT CODPLANO, CODCAUSA, CODISH FROM AD_ISHPLANO WHERE CODPLANO = ${Number(id)}`,
+    { pageSize: 1, maxPages: 1 },
+  );
+  if (!rows[0]) return;
+
+  await api.post('/api/sankhya/dataset/remove', {
+    entity: 'AD_ISHPLANO',
+    pks: [{
+      CODPLANO: Number(rows[0]['CODPLANO']),
+      CODCAUSA: Number(rows[0]['CODCAUSA']),
+      CODISH:   Number(rows[0]['CODISH']),
+    }],
+  });
+}
