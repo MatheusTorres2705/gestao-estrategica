@@ -22,6 +22,9 @@ import { TarifaHorariaView } from '@/components/TarifaHorariaView';
 import { TLCView } from '@/components/TLCView';
 import { getWorkingCapitalEstoque } from '@/services/workingCapitalService';
 import type { WorkingCapitalRow, Classificacao } from '@/services/workingCapitalService';
+import { getPcmCounts, getPcmItens } from '@/services/pcmService';
+import type { PcmCounts, PcmItem } from '@/services/pcmService';
+import { fmtMesFull } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 
 type OutletCtx = { mes: number; ano: number };
@@ -155,8 +158,8 @@ export default function IndicadorPage() {
         </div>
       </div>
 
-      {/* Métricas — ocultas em Produção (substituídas pelos KPI cards do OPE) */}
-      {indicador.id !== 'producao' && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Métricas — ocultas em Produção e PCM (têm views próprias) */}
+      {indicador.id !== 'producao' && indicador.id !== 'pcm' && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {indicador.metricas.map((m) => {
           const isNum = typeof m.valor === 'number' && typeof m.meta === 'number';
           const pct = isNum
@@ -200,8 +203,8 @@ export default function IndicadorPage() {
         })}
       </div>}
 
-      {/* Gráfico de tendência — substituído pelo OPE diário em Produção */}
-      {indicador.id !== 'producao' && (
+      {/* Gráfico de tendência — substituído pelo OPE diário em Produção e pelo PcmView em PCM */}
+      {indicador.id !== 'producao' && indicador.id !== 'pcm' && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Evolução — Últimos 6 Meses</h3>
           <TrendChart
@@ -219,7 +222,7 @@ export default function IndicadorPage() {
       {indicador.id === 'working-capital' && <WorkingCapitalDetalhe />}
       {indicador.id === 'seguranca' && indicador.detalheExtra && <SegurancaDetalhe detalhe={indicador.detalheExtra} />}
       {indicador.id === 'moldes' && indicador.detalheExtra && <MoldesDetalhe detalhe={indicador.detalheExtra} />}
-      {indicador.id === 'pcm' && indicador.detalheExtra && <PcmDetalhe detalhe={indicador.detalheExtra} />}
+      {indicador.id === 'pcm' && <PcmView mes={mes} ano={ano} tendencia={indicador.tendencia} />}
       {indicador.id === 'producao' && <ProducaoDetalhe mes={mes} ano={ano} />}
 
       {/* Análises de Ishikawa */}
@@ -564,12 +567,36 @@ function WorkingCapitalDetalhe() {
     [sumario],
   );
 
-  const rowsFiltrados = useMemo(() => {
+  const gruposFiltrados = useMemo(() => {
     const base = filtro ? rows.filter((r) => r.classificacao === filtro) : rows;
-    return [...base].sort((a, b) => b.custoTot - a.custoTot);
+    const map = new Map<string, { estTot: number; custoTot: number; coberturas: number[]; diasSemGiro: number[]; classificacoes: Record<Classificacao, number> }>();
+    for (const r of base) {
+      if (!map.has(r.descrGrupoProd)) {
+        map.set(r.descrGrupoProd, { estTot: 0, custoTot: 0, coberturas: [], diasSemGiro: [], classificacoes: {} as Record<Classificacao, number> });
+      }
+      const g = map.get(r.descrGrupoProd)!;
+      g.estTot += r.estTot;
+      g.custoTot += r.custoTot;
+      if (r.coberturaDias != null) g.coberturas.push(r.coberturaDias);
+      if (r.diasSemGiro != null) g.diasSemGiro.push(r.diasSemGiro);
+      g.classificacoes[r.classificacao] = (g.classificacoes[r.classificacao] ?? 0) + r.custoTot;
+    }
+    return Array.from(map.entries())
+      .map(([grupo, g]) => {
+        const classificacao = (Object.entries(g.classificacoes).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'NORMAL') as Classificacao;
+        return {
+          grupo,
+          estTot: g.estTot,
+          custoTot: g.custoTot,
+          coberturaDias: g.coberturas.length > 0 ? g.coberturas.reduce((s, v) => s + v, 0) / g.coberturas.length : null,
+          diasSemGiro: g.diasSemGiro.length > 0 ? g.diasSemGiro.reduce((s, v) => s + v, 0) / g.diasSemGiro.length : null,
+          classificacao,
+        };
+      })
+      .sort((a, b) => b.custoTot - a.custoTot);
   }, [rows, filtro]);
 
-  const rowsVisiveis = rowsFiltrados.slice(0, pagina);
+  const rowsVisiveis = gruposFiltrados.slice(0, pagina);
 
   const btnFiltro = (cl: Classificacao | null) => {
     const ativo = filtro === cl;
@@ -671,7 +698,7 @@ function WorkingCapitalDetalhe() {
           ))}
           {!loading && (
             <span className="ml-auto text-xs text-gray-400">
-              {rowsFiltrados.length} {rowsFiltrados.length === 1 ? 'item' : 'itens'}
+              {gruposFiltrados.length} {gruposFiltrados.length === 1 ? 'grupo' : 'grupos'}
             </span>
           )}
         </div>
@@ -680,8 +707,8 @@ function WorkingCapitalDetalhe() {
           <div className="flex items-center justify-center h-32">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
           </div>
-        ) : rowsFiltrados.length === 0 ? (
-          <div className="py-10 text-center text-sm text-gray-400">Nenhum item encontrado.</div>
+        ) : gruposFiltrados.length === 0 ? (
+          <div className="py-10 text-center text-sm text-gray-400">Nenhum grupo encontrado.</div>
         ) : (
           <>
             <div className="overflow-x-auto">
@@ -689,47 +716,40 @@ function WorkingCapitalDetalhe() {
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50 text-gray-500">
                     <th className="px-4 py-2 text-left font-medium">Grupo</th>
-                    <th className="px-4 py-2 text-left font-medium">Cód.</th>
-                    <th className="px-4 py-2 text-left font-medium">Produto</th>
                     <th className="px-4 py-2 text-right font-medium">Estoque</th>
                     <th className="px-4 py-2 text-right font-medium">Custo Total</th>
-                    <th className="px-4 py-2 text-right font-medium">Cobertura</th>
-                    <th className="px-4 py-2 text-right font-medium">Dias s/ Giro</th>
-                    <th className="px-4 py-2 text-center font-medium">Classif.</th>
+                    <th className="px-4 py-2 text-right font-medium">Cobertura Média</th>
+                    <th className="px-4 py-2 text-right font-medium">Dias s/ Giro (Média)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rowsVisiveis.map((r) => {
-                    const cfg = WC_CFG[r.classificacao];
+                  {rowsVisiveis.map((g) => {
+                    const cfg = WC_CFG[g.classificacao];
                     return (
-                      <tr key={r.codProd} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{r.descrGrupoProd}</td>
-                        <td className="px-4 py-2 font-mono text-gray-600">{r.codProd}</td>
+                      <tr key={g.grupo} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" title={`Classificação: ${cfg.label}`}>
                         <td className="px-4 py-2 text-gray-800 max-w-[240px]">
-                          <span className="line-clamp-1" title={r.descrProd}>{r.descrProd}</span>
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-2 rounded-full shrink-0" style={{ background: cfg.cor }} />
+                            <span className="line-clamp-1" title={g.grupo}>{g.grupo}</span>
+                          </div>
                         </td>
-                        <td className="px-4 py-2 text-right text-gray-700">{fmtQtd(r.estTot)}</td>
-                        <td className="px-4 py-2 text-right font-medium text-gray-800">{fmtBRL(r.custoTot)}</td>
-                        <td className="px-4 py-2 text-right text-gray-600">{r.coberturaDias != null ? `${fmtQtd(r.coberturaDias)} d` : '—'}</td>
-                        <td className="px-4 py-2 text-right text-gray-600">{r.diasSemGiro != null ? `${fmtQtd(r.diasSemGiro)} d` : '—'}</td>
-                        <td className="px-4 py-2 text-center">
-                          <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold border', cfg.bg, cfg.text, cfg.border)}>
-                            {cfg.label}
-                          </span>
-                        </td>
+                        <td className="px-4 py-2 text-right text-gray-700">{fmtQtd(g.estTot)}</td>
+                        <td className="px-4 py-2 text-right font-medium text-gray-800">{fmtBRL(g.custoTot)}</td>
+                        <td className="px-4 py-2 text-right text-gray-600">{g.coberturaDias != null ? `${fmtQtd(g.coberturaDias)} d` : '—'}</td>
+                        <td className="px-4 py-2 text-right text-gray-600">{g.diasSemGiro != null ? `${fmtQtd(g.diasSemGiro)} d` : '—'}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            {rowsFiltrados.length > pagina && (
+            {gruposFiltrados.length > pagina && (
               <div className="flex justify-center p-4 border-t border-gray-100">
                 <button
                   onClick={() => setPagina(p => p + 50)}
                   className="text-xs text-blue-600 hover:text-blue-800 font-medium"
                 >
-                  Mostrar mais ({rowsFiltrados.length - pagina} restantes)
+                  Mostrar mais ({gruposFiltrados.length - pagina} restantes)
                 </button>
               </div>
             )}
@@ -779,27 +799,431 @@ function MoldesDetalhe({ detalhe }: { detalhe: Record<string, unknown> }) {
   );
 }
 
-function PcmDetalhe({ detalhe }: { detalhe: Record<string, unknown> }) {
-  const faltantes = detalhe.faltantesCriticos as Array<{ codigo: string; descricao: string; quantidade: number; prevEntrega: string; acao: string }> ?? [];
+const PCM_CAT_CFG = {
+  'sem-previsao': {
+    label: 'Sem Previsão',
+    cardBg: 'bg-amber-50', cardBorder: 'border-amber-200', cardText: 'text-amber-700',
+    badgeCls: 'bg-amber-100 text-amber-700 border border-amber-200',
+    colHeader: 'bg-amber-50 border-amber-200 text-amber-700',
+    dot: '#D97706',
+  },
+  'atrasado': {
+    label: 'Atrasado',
+    cardBg: 'bg-red-50', cardBorder: 'border-red-200', cardText: 'text-red-700',
+    badgeCls: 'bg-red-100 text-red-700 border border-red-200',
+    colHeader: 'bg-red-50 border-red-200 text-red-700',
+    dot: '#DC2626',
+  },
+  'em-dia': {
+    label: 'Em Dia',
+    cardBg: 'bg-emerald-50', cardBorder: 'border-emerald-200', cardText: 'text-emerald-700',
+    badgeCls: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+    colHeader: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    dot: '#16A34A',
+  },
+} as const;
+
+function fmtPcmDate(s: string | null): string {
+  if (!s) return '—';
+  // DD/MM/YYYY already
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) return s.slice(0, 10);
+  // ISO or timestamp
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  }
+  return s;
+}
+
+function PcmItemCard({ item }: { item: PcmItem }) {
+  const cfg = PCM_CAT_CFG[item.categoria];
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-gray-700 mb-4">Itens Críticos Faltantes — Maio</h3>
-      <div className="space-y-3">
-        {faltantes.map((f) => (
-          <div key={f.codigo} className="rounded-lg border border-red-100 bg-red-50 p-3.5">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-xs font-mono text-red-600">{f.codigo}</p>
-                <p className="text-sm font-medium text-gray-800 mt-0.5">{f.descricao}</p>
+    <div className={cn('rounded-lg border p-3 space-y-1.5', cfg.cardBg, cfg.cardBorder)}>
+      <p className="text-xs font-semibold text-gray-800 leading-snug line-clamp-2">{item.descrprod || '—'}</p>
+      {item.chassi && (
+        <p className="text-[11px] text-gray-500">Chassi: <span className="font-medium text-gray-700">{item.chassi}</span></p>
+      )}
+      {item.nomeparc && (
+        <p className="text-[11px] text-gray-500 truncate">Fornecedor: <span className="text-gray-700">{item.nomeparc}</span></p>
+      )}
+      <div className="flex gap-3 pt-0.5">
+        <div>
+          <p className="text-[10px] text-gray-400">Necessário em</p>
+          <p className="text-[11px] font-medium text-gray-700">{fmtPcmDate(item.dtInicioprev)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-gray-400">Prev. entrega</p>
+          <p className={cn('text-[11px] font-medium', item.dtEntregav ? cfg.cardText : 'text-gray-400')}>
+            {fmtPcmDate(item.dtEntregav)}
+          </p>
+        </div>
+      </div>
+      {item.status && (
+        <span className={cn('inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium', cfg.badgeCls)}>
+          {item.status}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PcmView({ mes, ano, tendencia }: { mes: number; ano: number; tendencia: Indicador['tendencia'] }) {
+  const [counts, setCounts]           = useState<PcmCounts | null>(null);
+  const [itens, setItens]             = useState<PcmItem[]>([]);
+  const [loadingCards, setLoadingCards] = useState(true);
+  const [loadingItens, setLoadingItens] = useState(true);
+  const [erro, setErro]               = useState<string | null>(null);
+  const [erroItens, setErroItens]     = useState<string | null>(null);
+
+  useEffect(() => {
+    // Etapa 1 — cards: query leve, aparece rápido
+    setLoadingCards(true);
+    setErro(null);
+    getPcmCounts(mes, ano)
+      .then(setCounts)
+      .catch((e: Error) => setErro(`Falha ao carregar contadores PCM: ${e?.message ?? 'erro desconhecido'}`))
+      .finally(() => setLoadingCards(false));
+
+    // Etapa 2 — listas: query mais pesada, carrega em paralelo
+    setLoadingItens(true);
+    setErroItens(null);
+    getPcmItens(mes, ano)
+      .then(setItens)
+      .catch((e: Error) => setErroItens(`Falha ao carregar itens PCM: ${e?.message ?? 'erro desconhecido'}`))
+      .finally(() => setLoadingItens(false));
+  }, [mes, ano]);
+
+  const mesFull = fmtMesFull(mes);
+
+  // ── agrupamentos para as 3 colunas ───────────────────────────
+
+  const hoje = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
+
+  function parsePcmDate(s: string | null): Date | null {
+    if (!s) return null;
+    if (s.includes('/')) {
+      const [d, m, y] = s.split('/');
+      const dt = new Date(Number(y), Number(m) - 1, Number(d));
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  function diasLabel(datafimprev: string | null): { label: string; cls: string } | null {
+    const d = parsePcmDate(datafimprev);
+    if (!d) return null;
+    const diff = Math.round((d.getTime() - hoje.getTime()) / 86400000);
+    if (diff >= 0) return { label: `vence em ${diff}d`, cls: 'text-amber-600' };
+    return { label: `atrasa ${Math.abs(diff)}d`, cls: 'text-red-500' };
+  }
+
+  // Chassis em risco — agrupa por chassi, só os com atrasado ou sem previsão
+  const chassisRisco = useMemo(() => {
+    const map = new Map<string, { atrasado: number; semPrevisao: number; emDia: number; datafimprev: string | null }>();
+    for (const it of itens) {
+      if (!map.has(it.chassi)) map.set(it.chassi, { atrasado: 0, semPrevisao: 0, emDia: 0, datafimprev: it.datafimprev });
+      const g = map.get(it.chassi)!;
+      if (it.categoria === 'atrasado')       g.atrasado++;
+      else if (it.categoria === 'sem-previsao') g.semPrevisao++;
+      else                                    g.emDia++;
+      if (!g.datafimprev && it.datafimprev) g.datafimprev = it.datafimprev;
+    }
+    return Array.from(map.entries())
+      .filter(([, g]) => g.atrasado > 0 || g.semPrevisao > 0)
+      .map(([chassi, g]) => ({ chassi, ...g, total: g.atrasado + g.semPrevisao + g.emDia }))
+      .sort((a, b) => (b.atrasado + b.semPrevisao) - (a.atrasado + a.semPrevisao));
+  }, [itens, hoje]);
+
+  // Top 10 produtos — por nº de chassis impactados
+  const top10Produtos = useMemo(() => {
+    const map = new Map<string, { descrprod: string; chassisSet: Set<string>; atrasado: number; semPrevisao: number; emDia: number }>();
+    for (const it of itens) {
+      const k = it.descrprod || '(sem descrição)';
+      if (!map.has(k)) map.set(k, { descrprod: k, chassisSet: new Set(), atrasado: 0, semPrevisao: 0, emDia: 0 });
+      const g = map.get(k)!;
+      g.chassisSet.add(it.chassi);
+      if (it.categoria === 'atrasado')       g.atrasado++;
+      else if (it.categoria === 'sem-previsao') g.semPrevisao++;
+      else                                    g.emDia++;
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.chassisSet.size - a.chassisSet.size)
+      .slice(0, 10);
+  }, [itens]);
+
+  // Top 10 fornecedores — por itens em falta (atrasado + sem previsão)
+  const top10Fornecedores = useMemo(() => {
+    const map = new Map<string, { nomeparc: string; atrasado: number; semPrevisao: number; emDia: number }>();
+    for (const it of itens) {
+      const k = it.nomeparc || 'Sem fornecedor';
+      if (!map.has(k)) map.set(k, { nomeparc: k, atrasado: 0, semPrevisao: 0, emDia: 0 });
+      const g = map.get(k)!;
+      if (it.categoria === 'atrasado')       g.atrasado++;
+      else if (it.categoria === 'sem-previsao') g.semPrevisao++;
+      else                                    g.emDia++;
+    }
+    return Array.from(map.values())
+      .sort((a, b) => (b.atrasado + b.semPrevisao) - (a.atrasado + a.semPrevisao))
+      .slice(0, 10);
+  }, [itens]);
+
+  type PcmCardDef = {
+    label: string;
+    value: number | null;
+    numCls: string;
+    meta: number;
+    metaLabel: string;
+    badgeLabel: string;
+    badgeCls: string;
+    diffCls: string;
+  };
+
+  const cards: PcmCardDef[] = [
+    {
+      label: `Itens Faltantes — ${mesFull}`,
+      value: counts?.total ?? null,
+      numCls: 'text-gray-900',
+      meta: 0,
+      metaLabel: '0 itens',
+      badgeLabel: counts && counts.total > 0 ? 'Crítico' : 'No Prazo',
+      badgeCls: counts && counts.total > 0
+        ? 'bg-red-50 text-red-700 border-red-200'
+        : 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      diffCls: 'text-red-500',
+    },
+    {
+      label: 'Atrasado',
+      value: counts?.atrasado ?? null,
+      numCls: 'text-red-600',
+      meta: 0,
+      metaLabel: '0 itens',
+      badgeLabel: counts && counts.atrasado > 0 ? 'Crítico' : 'No Prazo',
+      badgeCls: counts && counts.atrasado > 0
+        ? 'bg-red-50 text-red-700 border-red-200'
+        : 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      diffCls: 'text-red-500',
+    },
+    {
+      label: 'Sem Previsão',
+      value: counts?.semPrevisao ?? null,
+      numCls: 'text-amber-600',
+      meta: 0,
+      metaLabel: '0 itens',
+      badgeLabel: counts && counts.semPrevisao > 0 ? 'Atenção' : 'No Prazo',
+      badgeCls: counts && counts.semPrevisao > 0
+        ? 'bg-amber-50 text-amber-700 border-amber-200'
+        : 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      diffCls: 'text-amber-600',
+    },
+    {
+      label: 'Em Dia',
+      value: counts?.emDia ?? null,
+      numCls: 'text-emerald-600',
+      meta: counts?.total ?? 0,
+      metaLabel: `${counts?.total ?? 0} itens`,
+      badgeLabel: counts && counts.total > 0 && counts.emDia === counts.total ? 'No Prazo' : 'Atenção',
+      badgeCls: counts && counts.total > 0 && counts.emDia === counts.total
+        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+        : 'bg-amber-50 text-amber-700 border-amber-200',
+      diffCls: 'text-emerald-600',
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {cards.map(c => {
+          const diff = c.value !== null ? c.value - c.meta : null;
+          return (
+            <div key={c.label} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-gray-500 font-medium leading-tight">{c.label}</p>
+                {!loadingCards && (
+                  <span className={cn('inline-flex rounded-full px-2 py-0.5 text-xs font-medium border', c.badgeCls)}>
+                    {c.badgeLabel}
+                  </span>
+                )}
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs text-gray-500">Qtd: <span className="text-gray-800 font-medium">{f.quantidade}</span></p>
-                <p className="text-xs text-gray-500 mt-0.5">Prev: <span className="text-amber-600">{f.prevEntrega}</span></p>
+              {loadingCards ? (
+                <div className="h-8 w-16 rounded bg-gray-200 animate-pulse" />
+              ) : (
+                <p className={cn('text-2xl font-bold', c.numCls)}>
+                  {c.value?.toLocaleString('pt-BR') ?? '—'}
+                </p>
+              )}
+              <div className="flex items-center justify-between mt-1.5">
+                <p className="text-xs text-gray-400">
+                  <Target className="inline h-3 w-3 mr-1 text-gray-300" />
+                  Meta: {c.metaLabel}
+                </p>
+                {diff !== null && diff !== 0 && (
+                  <span className={cn('flex items-center gap-0.5 text-xs font-medium', c.diffCls)}>
+                    {diff > 0
+                      ? <TrendingUp className="h-3 w-3" />
+                      : <TrendingDown className="h-3 w-3" />}
+                    {Math.abs(diff).toLocaleString('pt-BR')} itens
+                  </span>
+                )}
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-2">Ação: {f.acao}</p>
+          );
+        })}
+      </div>
+
+      {/* Gráfico de evolução (mockado) */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">Evolução de Itens Faltantes — Últimos 6 Meses</h3>
+        <TrendChart data={tendencia} height={200} unit="" />
+      </div>
+
+      {/* Erro nos cards */}
+      {erro && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <p className="text-sm text-red-600">{erro}</p>
+        </div>
+      )}
+
+      {/* 3 Colunas */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+
+        {/* ── Chassis em risco ── */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+            <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">Chassis em risco</span>
+            <span className="text-sm font-bold text-red-500">
+              {loadingItens ? '…' : chassisRisco.length}
+            </span>
           </div>
-        ))}
+          <div className="divide-y divide-gray-50 max-h-[520px] overflow-y-auto">
+            {loadingItens ? (
+              <div className="p-3 space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 rounded-lg bg-gray-100 animate-pulse" />)}
+              </div>
+            ) : erroItens ? (
+              <p className="py-8 text-center text-xs text-red-400">{erroItens}</p>
+            ) : chassisRisco.length === 0 ? (
+              <p className="py-8 text-center text-xs text-gray-400">Nenhum chassis em risco</p>
+            ) : chassisRisco.map(({ chassi, atrasado, semPrevisao, emDia, datafimprev }) => {
+              const total = atrasado + semPrevisao + emDia;
+              const dl = diasLabel(datafimprev);
+              const piorCategoria = atrasado > 0 ? 'atrasado' : 'sem-previsao';
+              return (
+                <div key={chassi} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{chassi || '—'}</p>
+                    {dl && <p className={cn('text-[11px] font-medium mt-0.5', dl.cls)}>{dl.label}</p>}
+                  </div>
+                  <div className="text-right shrink-0 space-y-1">
+                    <p className={cn('text-xs font-bold', atrasado > 0 ? 'text-red-500' : 'text-amber-500')}>
+                      {total} {total === 1 ? 'item' : 'itens'}
+                    </p>
+                    <span className={cn(
+                      'inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium border',
+                      piorCategoria === 'atrasado'
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    )}>
+                      {piorCategoria === 'atrasado' ? 'atrasado' : 'sem previsão'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Top 10 produtos em falta ── */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Top 10 produtos em falta</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">por nº de chassis impactados</p>
+          </div>
+          <div className="p-3 space-y-3 max-h-[520px] overflow-y-auto">
+            {loadingItens ? (
+              Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-10 rounded bg-gray-100 animate-pulse" />)
+            ) : erroItens ? (
+              <p className="py-8 text-center text-xs text-red-400">{erroItens}</p>
+            ) : top10Produtos.length === 0 ? (
+              <p className="py-8 text-center text-xs text-gray-400">Sem dados</p>
+            ) : (() => {
+              const maxChassis = Math.max(...top10Produtos.map(p => p.chassisSet.size), 1);
+              return top10Produtos.map((p, i) => {
+                const total = p.atrasado + p.semPrevisao + p.emDia;
+                const pct = p.chassisSet.size / maxChassis * 100;
+                const pctAt = total > 0 ? p.atrasado    / total * 100 : 0;
+                const pctSp = total > 0 ? p.semPrevisao / total * 100 : 0;
+                return (
+                  <div key={p.descrprod} className="space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="shrink-0 text-[10px] font-bold text-gray-400 w-4 mt-0.5">{i + 1}.</span>
+                        <p className="text-xs text-gray-700 leading-tight line-clamp-2">{p.descrprod}</p>
+                      </div>
+                      <span className="shrink-0 text-xs font-bold text-gray-500 whitespace-nowrap">
+                        {p.chassisSet.size} <span className="font-normal text-gray-400">chassis</span>
+                      </span>
+                    </div>
+                    <div className="ml-6 h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full rounded-full flex overflow-hidden" style={{ width: `${pct}%` }}>
+                        <div className="h-full bg-red-400"   style={{ width: `${pctAt}%` }} />
+                        <div className="h-full bg-amber-400" style={{ width: `${pctSp}%` }} />
+                        <div className="h-full bg-emerald-400 flex-1" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+
+        {/* ── Top 10 fornecedores ── */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Top 10 fornecedores</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">por itens em falta (sem previsão + atrasado)</p>
+          </div>
+          <div className="p-3 space-y-3 max-h-[520px] overflow-y-auto">
+            {loadingItens ? (
+              Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-10 rounded bg-gray-100 animate-pulse" />)
+            ) : erroItens ? (
+              <p className="py-8 text-center text-xs text-red-400">{erroItens}</p>
+            ) : top10Fornecedores.length === 0 ? (
+              <p className="py-8 text-center text-xs text-gray-400">Sem dados</p>
+            ) : (() => {
+              const maxItens = Math.max(...top10Fornecedores.map(f => f.atrasado + f.semPrevisao + f.emDia), 1);
+              return top10Fornecedores.map((f, i) => {
+                const total = f.atrasado + f.semPrevisao + f.emDia;
+                const pct   = total / maxItens * 100;
+                const pctAt = total > 0 ? f.atrasado    / total * 100 : 0;
+                const pctSp = total > 0 ? f.semPrevisao / total * 100 : 0;
+                return (
+                  <div key={f.nomeparc} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="shrink-0 text-[10px] font-bold text-gray-400 w-4">{i + 1}.</span>
+                        <p className="text-xs text-gray-700 truncate">{f.nomeparc}</p>
+                      </div>
+                      <span className="shrink-0 text-xs font-bold text-gray-500 whitespace-nowrap">
+                        {total} <span className="font-normal text-gray-400">itens</span>
+                      </span>
+                    </div>
+                    <div className="ml-6 h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="h-full rounded-full flex overflow-hidden" style={{ width: `${pct}%` }}>
+                        <div className="h-full bg-red-400"   style={{ width: `${pctAt}%` }} />
+                        <div className="h-full bg-amber-400" style={{ width: `${pctSp}%` }} />
+                        <div className="h-full bg-emerald-400 flex-1" />
+                      </div>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+
       </div>
     </div>
   );
