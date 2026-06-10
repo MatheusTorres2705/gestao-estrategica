@@ -272,6 +272,7 @@ FROM (
   WHERE PON.DTPONTO BETWEEN ${oracleData(ini)} AND ${oracleData(fim)}
     AND EQ.AD_USADO     = '1'
     AND DEPL.SETORMACRO = '${setor}'
+    AND DEPL.SETORMACRO IS NOT NULL
     AND DEPL.CODPROJPAI IS NOT NULL
 )
 WHERE LINHA IN (${linhasIn})
@@ -578,7 +579,7 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white rounded-t-2xl">
           <div>
             <h2 className="text-base font-bold text-slate-800">Detalhamento OPE</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Atividades e ponto por setor — Linha Maiores, Linha Menores e OPE geral</p>
+            <p className="text-xs text-slate-500 mt-0.5">Atividades e ponto por setor — Galpão 3, Galpão 1 + Galpão 2 e OPE geral</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
             <X className="h-5 w-5" />
@@ -609,8 +610,8 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
 
             {/* Tabelas */}
             <div className="flex flex-col gap-5 p-5">
-              <TabelaCard titulo="Linha Maiores" linhas={maiores} loading={loadingTab} />
-              <TabelaCard titulo="Linha Menores" linhas={menores} loading={loadingTab} />
+              <TabelaCard titulo="Galpão 3 (NX 500 - NX 620)" linhas={maiores} loading={loadingTab} />
+              <TabelaCard titulo="Galpão 1 + Galpão 2 (NX 260 - NX 440)" linhas={menores} loading={loadingTab} />
               <TabelaCard titulo="OPE"           linhas={ope}     loading={loadingTab} />
             </div>
           </div>
@@ -636,8 +637,8 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
 
             {/* Gráficos */}
             <div className="flex flex-col gap-5 p-5">
-              <GraficoCard titulo="Linha Maiores" tipo="maiores" dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
-              <GraficoCard titulo="Linha Menores" tipo="menores" dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
+              <GraficoCard titulo="Galpão 3 (NX 500 - NX 620)" tipo="maiores" dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
+              <GraficoCard titulo="Galpão 1 + Galpão 2 (NX 260 - NX 440)" tipo="menores" dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
               <GraficoCard titulo="OPE"           tipo="ope"     dadosAtivGraf={dadosAtivGraf} dadosPontoGraf={dadosPontoGraf} loading={loadingGraf} />
             </div>
           </div>

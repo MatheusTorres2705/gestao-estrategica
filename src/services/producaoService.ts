@@ -176,6 +176,7 @@ FROM (
   WHERE PON.DTPONTO BETWEEN ${_oracleData(ini)} AND ${_oracleData(fim)}
     AND EQ.AD_USADO     = '1'
     AND DEPL.SETORMACRO = '${setor}'
+    AND DEPL.SETORMACRO IS NOT NULL
     AND DEPL.CODPROJPAI IS NOT NULL
 )
 WHERE LINHA IN (${linhasIn})
