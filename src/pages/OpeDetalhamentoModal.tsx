@@ -77,7 +77,7 @@ const OPCOES_SETOR_GRAF = [
 
 const OPCOES_GALP_GRAF = [
   { label: 'Geral',    fn: (_: string) => true },
-  { label: 'Galpão 1', fn: (l: string) => LINHAS_MAIORES.has(l) },
+  { label: 'Galpão 1', fn: (l: string) => LINHAS_MENORES.has(l) },
   { label: 'Galpão 2', fn: (l: string) => LINHAS_GALP2.has(l)   },
   { label: 'Galpão 3', fn: (l: string) => LINHAS_GALP3.has(l)   },
 ];
@@ -127,8 +127,7 @@ function agregar(ativos: RawAtivRow[], pontos: RawPontoRow[], filtroLinha: (l: s
 
 function agregarOpe(ativos: RawAtivRow[], pontos: RawPontoRow[]): AggRow[] {
   const grupos = [
-    { label: 'Geral',    fn: (_: string) => true },
-    { label: 'Galpão 1', fn: (l: string) => LINHAS_MAIORES.has(l) },
+    { label: 'Galpão 1', fn: (l: string) => LINHAS_MENORES.has(l) },
     { label: 'Galpão 2', fn: (l: string) => LINHAS_GALP2.has(l) },
     { label: 'Galpão 3', fn: (l: string) => LINHAS_GALP3.has(l) },
   ];
