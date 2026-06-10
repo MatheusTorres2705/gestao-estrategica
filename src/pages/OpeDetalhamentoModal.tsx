@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line,
@@ -257,13 +257,13 @@ SELECT LINHA, DATA, SETORMACRO,
   COUNT(*)      AS QTD_REGISTROS,
   COUNT(*) * 8  AS HORAS_PONTO
 FROM (
-  SELECT DISTINCT
+  SELECT
     PON.CODFUNC,
     TO_CHAR(PON.DTPONTO, 'DD/MM/YYYY') AS DATA,
-    'NX' || CASE SUBSTR(DEPL.CODPROJPAI, 3, 3)
-                 WHEN '480' THEN '500'
-                 ELSE SUBSTR(DEPL.CODPROJPAI, 3, 3)
-            END  AS LINHA,
+    MIN('NX' || CASE SUBSTR(DEPL.CODPROJPAI, 3, 3)
+                     WHEN '480' THEN '500'
+                     ELSE SUBSTR(DEPL.CODPROJPAI, 3, 3)
+                END) AS LINHA,
     DEPL.SETORMACRO
   FROM AD_BATPONTO PON
     JOIN TFPEQP EQ        ON EQ.CODEQP   = PON.CODEQP
@@ -274,11 +274,121 @@ FROM (
     AND DEPL.SETORMACRO = '${setor}'
     AND DEPL.SETORMACRO IS NOT NULL
     AND DEPL.CODPROJPAI IS NOT NULL
+  GROUP BY PON.CODFUNC, PON.DTPONTO, DEPL.SETORMACRO
 )
 WHERE LINHA IN (${linhasIn})
 GROUP BY LINHA, DATA, SETORMACRO
 ORDER BY LINHA, DATA, SETORMACRO
 `.trim();
+}
+
+/* ── SQL Ponto Detalhe ─────────────────────────────────────── */
+function buildSqlPontoDetalhe(ini: string, fim: string, linhasArr: string[], setor: string | null): string {
+  const linhasIn = linhasArr.map(l => `'${l}'`).join(',');
+  const linhaExpr = `'NX' || CASE SUBSTR(DEPL.CODPROJPAI, 3, 3) WHEN '480' THEN '500' ELSE SUBSTR(DEPL.CODPROJPAI, 3, 3) END`;
+  return `
+SELECT DISTINCT
+  FUN.CODFUNC                           AS CODIGO,
+  FUN.NOMEFUNC                          AS NOME,
+  DEP.DESCRDEP                          AS DEPARTAMENTO_PROD,
+  TO_CHAR(PON.DTPONTO, 'DD/MM/YYYY')   AS DATA
+FROM AD_BATPONTO PON
+JOIN TFPEQP EQ        ON EQ.CODEQP   = PON.CODEQP
+JOIN TFPFUN FUN       ON FUN.CODFUNC = PON.CODFUNC
+JOIN TFPDEP DEP       ON DEP.CODDEP  = FUN.CODDEP
+JOIN AD_DEPLINHA DEPL ON DEPL.CODDEP = FUN.CODDEP
+WHERE PON.DTPONTO BETWEEN ${oracleData(ini)} AND ${oracleData(fim)}
+  AND EQ.AD_USADO        = '1'
+  AND DEPL.CODPROJPAI IS NOT NULL
+  AND DEPL.SETORMACRO IS NOT NULL
+  AND ${linhaExpr} IN (${linhasIn})
+${setor ? `  AND DEPL.SETORMACRO = '${setor}'` : ''}
+ORDER BY NOME, DATA
+`.trim();
+}
+
+type PontoDetalheRow = { codigo: string; nome: string; departamento: string; data: string };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapPontoDetalhe(r: Record<string, any>): PontoDetalheRow {
+  return {
+    codigo:       String(r['CODIGO']            ?? r['codigo']            ?? ''),
+    nome:         String(r['NOME']              ?? r['nome']              ?? ''),
+    departamento: String(r['DEPARTAMENTO_PROD'] ?? r['departamento_prod'] ?? ''),
+    data:         String(r['DATA']              ?? r['data']              ?? ''),
+  };
+}
+
+/* ── Popup de detalhe de ponto ─────────────────────────────── */
+function PontoDetalhePopup({ titulo, ini, fim, linhasArr, setor, onClose }: {
+  titulo: string;
+  ini: string;
+  fim: string;
+  linhasArr: string[];
+  setor: string | null;
+  onClose: () => void;
+}) {
+  const [rows, setRows]       = useState<PontoDetalheRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro]       = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true); setErro(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    obterReg<Record<string, any>>(buildSqlPontoDetalhe(ini, fim, linhasArr, setor))
+      .then(res => setRows(res.map(mapPontoDetalhe)))
+      .catch(() => setErro('Falha ao carregar detalhamento'))
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ini, fim, linhasArr.join(','), setor]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col max-h-[80vh]">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+          <div>
+            <span className="text-sm font-bold text-slate-800">Detalhe — {titulo}</span>
+            <p className="text-xs text-slate-400 mt-0.5">{ini} até {fim}</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="overflow-auto flex-1">
+          {loading && <p className="px-5 py-4 text-xs text-slate-400">Carregando...</p>}
+          {erro    && <p className="px-5 py-4 text-xs text-rose-500">{erro}</p>}
+          {!loading && !erro && (
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Código</th>
+                  <th className="px-4 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Nome</th>
+                  <th className="px-4 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Departamento</th>
+                  <th className="px-4 py-2 text-left font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Data</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                    <td className="px-4 py-1.5 text-slate-500 tabular-nums">{r.codigo}</td>
+                    <td className="px-4 py-1.5 text-slate-800 font-medium">{r.nome}</td>
+                    <td className="px-4 py-1.5 text-slate-600">{r.departamento}</td>
+                    <td className="px-4 py-1.5 text-slate-500 tabular-nums">{r.data}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {!loading && !erro && rows.length === 0 && (
+            <p className="px-5 py-4 text-xs text-slate-400">Nenhum registro encontrado.</p>
+          )}
+        </div>
+        <div className="px-5 py-2 border-t border-slate-100 text-xs text-slate-400 text-right">
+          {!loading && !erro && `${rows.length} registros`}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /* ── Mapeadores ────────────────────────────────────────────── */
@@ -360,12 +470,37 @@ function OpeChart({ series, loading }: { series: DailyPoint[]; loading: boolean 
   );
 }
 
+const LABEL_TO_SETOR: Record<string, string> = {
+  'Acabamento': 'ACAB', 'Montagem': 'MONT', 'Marcenaria': 'MARC',
+  'Elétrica': 'ELET', 'Laminação': 'LAM', 'Rebarba': 'REB',
+};
+
+const OPE_LABEL_TO_LINHAS: Record<string, string[]> = {
+  'Galpão 1': [...LINHAS_MENORES],
+  'Galpão 2': [...LINHAS_GALP2],
+  'Galpão 3': [...LINHAS_GALP3],
+};
+
 /* ── Tabela por seção ──────────────────────────────────────── */
-function TabelaCard({ titulo, linhas, loading }: {
+function TabelaCard({ titulo, linhas, loading, ini, fim, linhasArr }: {
   titulo: string;
   linhas: AggRow[];
   loading: boolean;
+  ini?: string;
+  fim?: string;
+  linhasArr?: string[];
 }) {
+  const [detalhe, setDetalhe] = useState<{ label: string; linhas: string[]; setor: string | null } | null>(null);
+
+  function handleLabelClick(label: string) {
+    if (!ini || !fim) return;
+    const opeLinhas = OPE_LABEL_TO_LINHAS[label];
+    if (opeLinhas) {
+      setDetalhe({ label, linhas: opeLinhas, setor: null });
+    } else if (linhasArr && LABEL_TO_SETOR[label]) {
+      setDetalhe({ label, linhas: linhasArr, setor: LABEL_TO_SETOR[label] });
+    }
+  }
   const totAtivH   = linhas.reduce((s, l) => s + l.horas,           0);
   const totRetrabH = linhas.reduce((s, l) => s + l.horasRetrabalho, 0);
   const totPontoH  = linhas.reduce((s, l) => s + l.horasReg,        0);
@@ -376,6 +511,16 @@ function TabelaCard({ titulo, linhas, loading }: {
   const col = 'grid-cols-[1fr_68px_68px_68px_68px_50px] gap-x-3';
 
   return (
+    <>
+    {detalhe && ini && fim && (
+      <PontoDetalhePopup
+        titulo={`${titulo} — ${detalhe.label}`}
+        ini={ini} fim={fim}
+        linhasArr={detalhe.linhas}
+        setor={detalhe.setor}
+        onClose={() => setDetalhe(null)}
+      />
+    )}
     <div className="flex flex-col gap-1.5">
       <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{titulo}</span>
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -392,9 +537,13 @@ function TabelaCard({ titulo, linhas, loading }: {
           <p className="px-3 py-3 text-xs text-slate-300">Carregando...</p>
         ) : linhas.map(l => {
           const pend = l.horasReg - l.horas - l.horasRetrabalho;
+          const isClickable = !!(ini && fim && (OPE_LABEL_TO_LINHAS[l.label] || (linhasArr && LABEL_TO_SETOR[l.label])));
           return (
             <div key={l.label} className={`grid ${col} px-3 py-1.5 border-b border-slate-50 last:border-0`}>
-              <span className="text-xs text-slate-700 truncate">{l.label}</span>
+              <span
+                className={`text-xs text-slate-700 truncate ${isClickable ? 'cursor-pointer hover:text-indigo-600 hover:underline' : ''}`}
+                onClick={() => isClickable && handleLabelClick(l.label)}
+              >{l.label}</span>
               <span className="text-xs font-semibold text-emerald-600 text-right tabular-nums">{l.horasReg.toFixed(2)}</span>
               <span className="text-xs font-semibold text-blue-600    text-right tabular-nums">{l.horas.toFixed(2)}</span>
               <span className="text-xs font-semibold text-orange-500  text-right tabular-nums">{hasLoss(l.horasRetrabalho) ? l.horasRetrabalho.toFixed(2) : '—'}</span>
@@ -415,6 +564,7 @@ function TabelaCard({ titulo, linhas, loading }: {
         )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -610,9 +760,9 @@ export function OpeDetalhamentoModal({ onClose }: Props) {
 
             {/* Tabelas */}
             <div className="flex flex-col gap-5 p-5">
-              <TabelaCard titulo="Galpão 3 (NX 500 - NX 620)" linhas={maiores} loading={loadingTab} />
-              <TabelaCard titulo="Galpão 1 + Galpão 2 (NX 260 - NX 440)" linhas={menores} loading={loadingTab} />
-              <TabelaCard titulo="OPE"           linhas={ope}     loading={loadingTab} />
+              <TabelaCard titulo="Galpão 3 (NX 500 - NX 620)"          linhas={maiores} loading={loadingTab} ini={periodoTab.ini} fim={periodoTab.fim} linhasArr={LINHAS_MAIORES_ARR} />
+              <TabelaCard titulo="Galpão 1 + Galpão 2 (NX 260 - NX 440)" linhas={menores} loading={loadingTab} ini={periodoTab.ini} fim={periodoTab.fim} linhasArr={LINHAS_MENORES_ARR} />
+              <TabelaCard titulo="OPE"                                    linhas={ope}     loading={loadingTab} ini={periodoTab.ini} fim={periodoTab.fim} />
             </div>
           </div>
 
