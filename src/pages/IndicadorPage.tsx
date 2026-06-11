@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   LineChart, Line, XAxis, YAxis, ReferenceLine,
+  BarChart, Bar,
 } from 'recharts';
 import { obterReg } from '@/lib/obterReg';
 import { TarifaHorariaView } from '@/components/TarifaHorariaView';
@@ -23,7 +24,8 @@ import { TLCView } from '@/components/TLCView';
 import { getWorkingCapitalEstoque } from '@/services/workingCapitalService';
 import type { WorkingCapitalRow, Classificacao } from '@/services/workingCapitalService';
 import { getPcmCounts, getPcmItens } from '@/services/pcmService';
-import type { PcmCounts, PcmItem } from '@/services/pcmService';
+import type { PcmCounts, PcmItem, PcmCategoria } from '@/services/pcmService';
+import { PcmPresentationMode } from '@/components/PcmPresentationMode';
 import { fmtMesFull } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 
@@ -203,8 +205,8 @@ export default function IndicadorPage() {
         })}
       </div>}
 
-      {/* Gráfico de tendência — substituído pelo OPE diário em Produção e pelo PcmView em PCM */}
-      {indicador.id !== 'producao' && indicador.id !== 'pcm' && (
+      {/* Gráfico de tendência — substituído pelo OPE diário em Produção, PcmView em PCM e removido em Working Capital */}
+      {indicador.id !== 'producao' && indicador.id !== 'pcm' && indicador.id !== 'working-capital' && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Evolução — Últimos 6 Meses</h3>
           <TrendChart
@@ -530,12 +532,98 @@ function fmtQtd(v: number) {
   return v.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 }
 
+function GrupoDrillModal({ grupo, rows, onClose }: {
+  grupo: string;
+  rows: WorkingCapitalRow[];
+  onClose: () => void;
+}) {
+  const produtos = rows
+    .filter(r => r.descrGrupoProd === grupo)
+    .sort((a, b) => b.custoTot - a.custoTot);
+
+  const totEstoque = produtos.reduce((s, r) => s + r.estTot, 0);
+  const totCusto   = produtos.reduce((s, r) => s + r.custoTot, 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[80vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <p className="text-sm font-bold text-gray-800">{grupo}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{produtos.length} produto{produtos.length !== 1 ? 's' : ''} · {fmtBRL(totCusto)} custo total</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Tabela */}
+        <div className="overflow-y-auto flex-1">
+          <table className="w-full">
+            <thead className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100">
+              <tr className="text-gray-500">
+                <th className="px-4 py-2 text-left text-[11px] font-medium">Produto</th>
+                <th className="px-4 py-2 text-right text-[11px] font-medium">Estoque</th>
+                <th className="px-4 py-2 text-right text-[11px] font-medium">Custo Total</th>
+                <th className="px-4 py-2 text-right text-[11px] font-medium">Cobertura</th>
+                <th className="px-4 py-2 text-right text-[11px] font-medium">Dias s/ Giro</th>
+                <th className="px-4 py-2 text-center text-[11px] font-medium">Classificação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {produtos.map(p => {
+                const cfg = WC_CFG[p.classificacao];
+                return (
+                  <tr key={p.codProd} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-1.5 text-[11px] text-gray-800 max-w-[260px]">
+                      <span className="truncate block" title={p.descrProd}>{p.descrProd}</span>
+                      <span className="text-[10px] text-gray-400">#{p.codProd}</span>
+                    </td>
+                    <td className="px-4 py-1.5 text-[11px] text-right text-gray-700 tabular-nums">{fmtQtd(p.estTot)}</td>
+                    <td className="px-4 py-1.5 text-[11px] text-right font-medium text-gray-800 tabular-nums">{fmtBRL(p.custoTot)}</td>
+                    <td className="px-4 py-1.5 text-[11px] text-right text-gray-600 tabular-nums">{p.coberturaDias != null ? `${fmtQtd(p.coberturaDias)} d` : '—'}</td>
+                    <td className="px-4 py-1.5 text-[11px] text-right text-gray-600 tabular-nums">{p.diasSemGiro != null ? `${fmtQtd(p.diasSemGiro)} d` : '—'}</td>
+                    <td className="px-4 py-1.5 text-center">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+                        {cfg.label}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="sticky bottom-0 bg-gray-100 border-t-2 border-gray-200">
+              <tr>
+                <td className="px-4 py-1.5 text-[11px] font-semibold text-gray-700">Total ({produtos.length})</td>
+                <td className="px-4 py-1.5 text-[11px] text-right font-semibold text-gray-700 tabular-nums">{fmtQtd(totEstoque)}</td>
+                <td className="px-4 py-1.5 text-[11px] text-right font-semibold text-gray-700 tabular-nums">{fmtBRL(totCusto)}</td>
+                <td colSpan={3} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkingCapitalDetalhe() {
   const [rows, setRows] = useState<WorkingCapitalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<Classificacao | null>(null);
   const [pagina, setPagina] = useState(50);
+  const [drillGrupo, setDrillGrupo] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -597,6 +685,23 @@ function WorkingCapitalDetalhe() {
   }, [rows, filtro]);
 
   const rowsVisiveis = gruposFiltrados.slice(0, pagina);
+
+  // Totalizadores do rodapé — sobre TODO o conjunto filtrado (não só a página visível).
+  // Estoque/Custo somam; Cobertura e Dias s/ Giro usam média ponderada por custo.
+  const totais = useMemo(() => {
+    let estTot = 0, custoTot = 0, cobW = 0, cobWsum = 0, giroW = 0, giroWsum = 0;
+    for (const g of gruposFiltrados) {
+      estTot += g.estTot || 0;
+      custoTot += g.custoTot || 0;
+      if (g.coberturaDias != null) { cobW += g.coberturaDias * (g.custoTot || 0); cobWsum += g.custoTot || 0; }
+      if (g.diasSemGiro != null) { giroW += g.diasSemGiro * (g.custoTot || 0); giroWsum += g.custoTot || 0; }
+    }
+    return {
+      estTot, custoTot,
+      coberturaDias: cobWsum > 0 ? cobW / cobWsum : null,
+      diasSemGiro: giroWsum > 0 ? giroW / giroWsum : null,
+    };
+  }, [gruposFiltrados]);
 
   const btnFiltro = (cl: Classificacao | null) => {
     const ativo = filtro === cl;
@@ -710,52 +815,68 @@ function WorkingCapitalDetalhe() {
         ) : gruposFiltrados.length === 0 ? (
           <div className="py-10 text-center text-sm text-gray-400">Nenhum grupo encontrado.</div>
         ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-gray-100 bg-gray-50 text-gray-500">
-                    <th className="px-4 py-2 text-left font-medium">Grupo</th>
-                    <th className="px-4 py-2 text-right font-medium">Estoque</th>
-                    <th className="px-4 py-2 text-right font-medium">Custo Total</th>
-                    <th className="px-4 py-2 text-right font-medium">Cobertura Média</th>
-                    <th className="px-4 py-2 text-right font-medium">Dias s/ Giro (Média)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rowsVisiveis.map((g) => {
-                    const cfg = WC_CFG[g.classificacao];
-                    return (
-                      <tr key={g.grupo} className="border-b border-gray-50 hover:bg-gray-50 transition-colors" title={`Classificação: ${cfg.label}`}>
-                        <td className="px-4 py-2 text-gray-800 max-w-[240px]">
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full shrink-0" style={{ background: cfg.cor }} />
-                            <span className="line-clamp-1" title={g.grupo}>{g.grupo}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 text-right text-gray-700">{fmtQtd(g.estTot)}</td>
-                        <td className="px-4 py-2 text-right font-medium text-gray-800">{fmtBRL(g.custoTot)}</td>
-                        <td className="px-4 py-2 text-right text-gray-600">{g.coberturaDias != null ? `${fmtQtd(g.coberturaDias)} d` : '—'}</td>
-                        <td className="px-4 py-2 text-right text-gray-600">{g.diasSemGiro != null ? `${fmtQtd(g.diasSemGiro)} d` : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {gruposFiltrados.length > pagina && (
-              <div className="flex justify-center p-4 border-t border-gray-100">
-                <button
-                  onClick={() => setPagina(p => p + 50)}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-                >
-                  Mostrar mais ({gruposFiltrados.length - pagina} restantes)
-                </button>
-              </div>
-            )}
-          </>
+          <div className="overflow-y-auto max-h-72">
+            <table className="w-full">
+              <thead className="sticky top-0 z-10 bg-gray-50">
+                <tr className="border-b border-gray-100 text-gray-500">
+                  <th className="px-3 py-1.5 text-left text-[11px] font-medium">Grupo</th>
+                  <th className="px-3 py-1.5 text-right text-[11px] font-medium">Estoque</th>
+                  <th className="px-3 py-1.5 text-right text-[11px] font-medium">Custo Total</th>
+                  <th className="px-3 py-1.5 text-right text-[11px] font-medium">Cobertura Média</th>
+                  <th className="px-3 py-1.5 text-right text-[11px] font-medium">Dias s/ Giro</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rowsVisiveis.map((g) => {
+                  const cfg = WC_CFG[g.classificacao];
+                  return (
+                    <tr
+                      key={g.grupo}
+                      className="border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer select-none"
+                      title="Duplo clique para ver produtos"
+                      onDoubleClick={() => setDrillGrupo(g.grupo)}
+                    >
+                      <td className="px-3 py-1 text-[11px] text-gray-800 max-w-[220px]">
+                        <div className="flex items-center gap-1.5">
+                          <div className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: cfg.cor }} />
+                          <span className="truncate" title={g.grupo}>{g.grupo}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-1 text-[11px] text-right text-gray-700 tabular-nums">{fmtQtd(g.estTot)}</td>
+                      <td className="px-3 py-1 text-[11px] text-right font-medium text-gray-800 tabular-nums">{fmtBRL(g.custoTot)}</td>
+                      <td className="px-3 py-1 text-[11px] text-right text-gray-600 tabular-nums">{g.coberturaDias != null ? `${fmtQtd(g.coberturaDias)} d` : '—'}</td>
+                      <td className="px-3 py-1 text-[11px] text-right text-gray-600 tabular-nums">{g.diasSemGiro != null ? `${fmtQtd(g.diasSemGiro)} d` : '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="sticky bottom-0 z-10 bg-gray-100 border-t-2 border-gray-200">
+                <tr>
+                  <td className="px-3 py-1.5 text-[11px] font-semibold text-gray-700">
+                    Total ({gruposFiltrados.length} {gruposFiltrados.length === 1 ? 'grupo' : 'grupos'})
+                  </td>
+                  <td className="px-3 py-1.5 text-[11px] text-right font-semibold text-gray-700 tabular-nums">{fmtQtd(totais.estTot)}</td>
+                  <td className="px-3 py-1.5 text-[11px] text-right font-semibold text-gray-700 tabular-nums">{fmtBRL(totais.custoTot)}</td>
+                  <td className="px-3 py-1.5 text-[11px] text-right text-gray-500 tabular-nums">
+                    {totais.coberturaDias != null ? `${fmtQtd(totais.coberturaDias)} d` : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-[11px] text-right text-gray-500 tabular-nums">
+                    {totais.diasSemGiro != null ? `${fmtQtd(totais.diasSemGiro)} d` : '—'}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         )}
       </div>
+
+      {drillGrupo && (
+        <GrupoDrillModal
+          grupo={drillGrupo}
+          rows={rows}
+          onClose={() => setDrillGrupo(null)}
+        />
+      )}
     </div>
   );
 }
@@ -868,15 +989,21 @@ function PcmItemCard({ item }: { item: PcmItem }) {
 }
 
 function PcmView({ mes, ano, tendencia }: { mes: number; ano: number; tendencia: Indicador['tendencia'] }) {
-  const [counts, setCounts]           = useState<PcmCounts | null>(null);
-  const [itens, setItens]             = useState<PcmItem[]>([]);
+  const [counts, setCounts]             = useState<PcmCounts | null>(null);
+  const [itens, setItens]               = useState<PcmItem[]>([]);
   const [loadingCards, setLoadingCards] = useState(true);
   const [loadingItens, setLoadingItens] = useState(true);
-  const [erro, setErro]               = useState<string | null>(null);
-  const [erroItens, setErroItens]     = useState<string | null>(null);
+  const [erro, setErro]                 = useState<string | null>(null);
+  const [erroItens, setErroItens]       = useState<string | null>(null);
+
+  const [apresentando, setApresentando] = useState(false);
+
+  // ── filter state ─────────────────────────────────────────────
+  const [statusFiltro, setStatusFiltro]       = useState<PcmCategoria | null>(null);
+  const [modeloFiltro, setModeloFiltro]       = useState<string | null>(null);
+  const [fornecedorFiltro, setFornecedorFiltro] = useState<string | null>(null);
 
   useEffect(() => {
-    // Etapa 1 — cards: query leve, aparece rápido
     setLoadingCards(true);
     setErro(null);
     getPcmCounts(mes, ano)
@@ -884,7 +1011,6 @@ function PcmView({ mes, ano, tendencia }: { mes: number; ano: number; tendencia:
       .catch((e: Error) => setErro(`Falha ao carregar contadores PCM: ${e?.message ?? 'erro desconhecido'}`))
       .finally(() => setLoadingCards(false));
 
-    // Etapa 2 — listas: query mais pesada, carrega em paralelo
     setLoadingItens(true);
     setErroItens(null);
     getPcmItens(mes, ano)
@@ -892,10 +1018,6 @@ function PcmView({ mes, ano, tendencia }: { mes: number; ano: number; tendencia:
       .catch((e: Error) => setErroItens(`Falha ao carregar itens PCM: ${e?.message ?? 'erro desconhecido'}`))
       .finally(() => setLoadingItens(false));
   }, [mes, ano]);
-
-  const mesFull = fmtMesFull(mes);
-
-  // ── agrupamentos para as 3 colunas ───────────────────────────
 
   const hoje = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d; }, []);
 
@@ -918,161 +1040,161 @@ function PcmView({ mes, ano, tendencia }: { mes: number; ano: number; tendencia:
     return { label: `atrasa ${Math.abs(diff)}d`, cls: 'text-red-500' };
   }
 
-  // Chassis em risco — agrupa por chassi, só os com atrasado ou sem previsão
-  const chassisRisco = useMemo(() => {
-    const map = new Map<string, { atrasado: number; semPrevisao: number; emDia: number; datafimprev: string | null }>();
-    for (const it of itens) {
-      if (!map.has(it.chassi)) map.set(it.chassi, { atrasado: 0, semPrevisao: 0, emDia: 0, datafimprev: it.datafimprev });
-      const g = map.get(it.chassi)!;
-      if (it.categoria === 'atrasado')       g.atrasado++;
-      else if (it.categoria === 'sem-previsao') g.semPrevisao++;
-      else                                    g.emDia++;
-      if (!g.datafimprev && it.datafimprev) g.datafimprev = it.datafimprev;
-    }
-    return Array.from(map.entries())
-      .filter(([, g]) => g.atrasado > 0 || g.semPrevisao > 0)
-      .map(([chassi, g]) => ({ chassi, ...g, total: g.atrasado + g.semPrevisao + g.emDia }))
-      .sort((a, b) => (b.atrasado + b.semPrevisao) - (a.atrasado + a.semPrevisao));
-  }, [itens, hoje]);
+  // ── derived memos ─────────────────────────────────────────────
 
-  // Top 10 produtos — por nº de chassis impactados
-  const top10Produtos = useMemo(() => {
-    const map = new Map<string, { descrprod: string; chassisSet: Set<string>; atrasado: number; semPrevisao: number; emDia: number }>();
+  // Model chips: unique 5-char prefixes from chassi
+  const modeloChips = useMemo(() => {
+    const set = new Set<string>();
     for (const it of itens) {
-      const k = it.descrprod || '(sem descrição)';
-      if (!map.has(k)) map.set(k, { descrprod: k, chassisSet: new Set(), atrasado: 0, semPrevisao: 0, emDia: 0 });
-      const g = map.get(k)!;
-      g.chassisSet.add(it.chassi);
-      if (it.categoria === 'atrasado')       g.atrasado++;
-      else if (it.categoria === 'sem-previsao') g.semPrevisao++;
-      else                                    g.emDia++;
+      const prefix = it.chassi?.slice(0, 5)?.toUpperCase();
+      if (prefix && /^NX\d{3}$/.test(prefix)) set.add(prefix);
     }
-    return Array.from(map.values())
-      .sort((a, b) => b.chassisSet.size - a.chassisSet.size)
-      .slice(0, 10);
+    return Array.from(set).sort();
   }, [itens]);
 
-  // Top 10 fornecedores — por itens em falta (atrasado + sem previsão)
+  // Filtered items (for bar chart and column table)
+  const itensFiltrados = useMemo(() => {
+    return itens.filter(it => {
+      if (modeloFiltro && !it.chassi?.toUpperCase().startsWith(modeloFiltro)) return false;
+      if (fornecedorFiltro && it.nomeparc !== fornecedorFiltro) return false;
+      return true;
+    });
+  }, [itens, modeloFiltro, fornecedorFiltro]);
+
+  // For bar chart: grouped by chassi from itensFiltrados
+  const chassisBarData = useMemo(() => {
+    const map = new Map<string, { chassi: string; atrasado: number; semPrevisao: number; emDia: number }>();
+    for (const it of itensFiltrados) {
+      if (!map.has(it.chassi)) map.set(it.chassi, { chassi: it.chassi, atrasado: 0, semPrevisao: 0, emDia: 0 });
+      const g = map.get(it.chassi)!;
+      if (it.categoria === 'atrasado') g.atrasado++;
+      else if (it.categoria === 'sem-previsao') g.semPrevisao++;
+      else g.emDia++;
+    }
+    return Array.from(map.values())
+      .filter(g => {
+        if (statusFiltro === 'em-dia') return true;
+        return g.atrasado > 0 || g.semPrevisao > 0;
+      })
+      .sort((a, b) => (b.atrasado + b.semPrevisao) - (a.atrasado + a.semPrevisao))
+      .slice(0, 20);
+  }, [itensFiltrados, statusFiltro]);
+
+  // Top 10 fornecedores
   const top10Fornecedores = useMemo(() => {
     const map = new Map<string, { nomeparc: string; atrasado: number; semPrevisao: number; emDia: number }>();
-    for (const it of itens) {
+    for (const it of itensFiltrados) {
       const k = it.nomeparc || 'Sem fornecedor';
       if (!map.has(k)) map.set(k, { nomeparc: k, atrasado: 0, semPrevisao: 0, emDia: 0 });
       const g = map.get(k)!;
-      if (it.categoria === 'atrasado')       g.atrasado++;
+      if (it.categoria === 'atrasado') g.atrasado++;
       else if (it.categoria === 'sem-previsao') g.semPrevisao++;
-      else                                    g.emDia++;
+      else g.emDia++;
     }
     return Array.from(map.values())
       .sort((a, b) => (b.atrasado + b.semPrevisao) - (a.atrasado + a.semPrevisao))
       .slice(0, 10);
+  }, [itensFiltrados]);
+
+  // Grouped for table columns (NOT filtered by statusFiltro — each column IS the status)
+  const itensPorStatus = useMemo(() => ({
+    semPrevisao: itensFiltrados.filter(it => it.categoria === 'sem-previsao'),
+    atrasado:    itensFiltrados.filter(it => it.categoria === 'atrasado'),
+    emDia:       itensFiltrados.filter(it => it.categoria === 'em-dia'),
+  }), [itensFiltrados]);
+
+  // KPIs derived from all items (not filtered)
+  const totalChassis = useMemo(() => {
+    const s = new Set(itens.filter(it => it.categoria !== 'em-dia').map(it => it.chassi));
+    return s.size;
   }, [itens]);
 
-  type PcmCardDef = {
-    label: string;
-    value: number | null;
-    numCls: string;
-    meta: number;
-    metaLabel: string;
-    badgeLabel: string;
-    badgeCls: string;
-    diffCls: string;
-  };
+  const totalFornecedores = useMemo(() => {
+    const s = new Set(itens.map(it => it.nomeparc).filter(Boolean));
+    return s.size;
+  }, [itens]);
 
-  const cards: PcmCardDef[] = [
-    {
-      label: `Itens Faltantes — ${mesFull}`,
-      value: counts?.total ?? null,
-      numCls: 'text-gray-900',
-      meta: 0,
-      metaLabel: '0 itens',
-      badgeLabel: counts && counts.total > 0 ? 'Crítico' : 'No Prazo',
-      badgeCls: counts && counts.total > 0
-        ? 'bg-red-50 text-red-700 border-red-200'
-        : 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      diffCls: 'text-red-500',
-    },
-    {
-      label: 'Atrasado',
-      value: counts?.atrasado ?? null,
-      numCls: 'text-red-600',
-      meta: 0,
-      metaLabel: '0 itens',
-      badgeLabel: counts && counts.atrasado > 0 ? 'Crítico' : 'No Prazo',
-      badgeCls: counts && counts.atrasado > 0
-        ? 'bg-red-50 text-red-700 border-red-200'
-        : 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      diffCls: 'text-red-500',
-    },
-    {
-      label: 'Sem Previsão',
-      value: counts?.semPrevisao ?? null,
-      numCls: 'text-amber-600',
-      meta: 0,
-      metaLabel: '0 itens',
-      badgeLabel: counts && counts.semPrevisao > 0 ? 'Atenção' : 'No Prazo',
-      badgeCls: counts && counts.semPrevisao > 0
-        ? 'bg-amber-50 text-amber-700 border-amber-200'
-        : 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      diffCls: 'text-amber-600',
-    },
-    {
-      label: 'Em Dia',
-      value: counts?.emDia ?? null,
-      numCls: 'text-emerald-600',
-      meta: counts?.total ?? 0,
-      metaLabel: `${counts?.total ?? 0} itens`,
-      badgeLabel: counts && counts.total > 0 && counts.emDia === counts.total ? 'No Prazo' : 'Atenção',
-      badgeCls: counts && counts.total > 0 && counts.emDia === counts.total
-        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-        : 'bg-amber-50 text-amber-700 border-amber-200',
-      diffCls: 'text-emerald-600',
-    },
-  ];
+  // Status chip counts (from itensFiltrados with modelo+fornecedor filter)
+  const statusCounts = useMemo(() => ({
+    semPrevisao: itensFiltrados.filter(it => it.categoria === 'sem-previsao').length,
+    atrasado:    itensFiltrados.filter(it => it.categoria === 'atrasado').length,
+    emDia:       itensFiltrados.filter(it => it.categoria === 'em-dia').length,
+  }), [itensFiltrados]);
+
+  const barChartHeight = Math.max(180, chassisBarData.length * 28);
 
   return (
     <div className="space-y-5">
-      {/* KPI Cards */}
+
+      {apresentando && (
+        <PcmPresentationMode
+          mes={mes}
+          ano={ano}
+          counts={counts}
+          itens={itens}
+          totalChassis={totalChassis}
+          onClose={() => setApresentando(false)}
+        />
+      )}
+
+      {/* ── 1. KPI Cards ── */}
+      <div className="flex items-center justify-between mb-1">
+        <span />
+        <button
+          onClick={() => setApresentando(true)}
+          disabled={loadingItens}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-40"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+          </svg>
+          Apresentação
+        </button>
+      </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {cards.map(c => {
-          const diff = c.value !== null ? c.value - c.meta : null;
-          return (
-            <div key={c.label} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-gray-500 font-medium leading-tight">{c.label}</p>
-                {!loadingCards && (
-                  <span className={cn('inline-flex rounded-full px-2 py-0.5 text-xs font-medium border', c.badgeCls)}>
-                    {c.badgeLabel}
-                  </span>
-                )}
-              </div>
-              {loadingCards ? (
-                <div className="h-8 w-16 rounded bg-gray-200 animate-pulse" />
-              ) : (
-                <p className={cn('text-2xl font-bold', c.numCls)}>
-                  {c.value?.toLocaleString('pt-BR') ?? '—'}
-                </p>
-              )}
-              <div className="flex items-center justify-between mt-1.5">
-                <p className="text-xs text-gray-400">
-                  <Target className="inline h-3 w-3 mr-1 text-gray-300" />
-                  Meta: {c.metaLabel}
-                </p>
-                {diff !== null && diff !== 0 && (
-                  <span className={cn('flex items-center gap-0.5 text-xs font-medium', c.diffCls)}>
-                    {diff > 0
-                      ? <TrendingUp className="h-3 w-3" />
-                      : <TrendingDown className="h-3 w-3" />}
-                    {Math.abs(diff).toLocaleString('pt-BR')} itens
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {/* Produtos em falta */}
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500 font-medium leading-tight mb-2">Produtos em falta</p>
+          {loadingCards
+            ? <div className="h-8 w-16 rounded bg-gray-200 animate-pulse" />
+            : <p className="text-2xl font-bold text-gray-900">{counts?.total?.toLocaleString('pt-BR') ?? '—'}</p>
+          }
+          <p className="text-[11px] text-gray-400 mt-1">itens sem cobertura</p>
+        </div>
+
+        {/* Chassis afetados */}
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500 font-medium leading-tight mb-2">Chassis afetados</p>
+          {loadingItens
+            ? <div className="h-8 w-16 rounded bg-gray-200 animate-pulse" />
+            : <p className="text-2xl font-bold text-gray-700">{totalChassis.toLocaleString('pt-BR')}</p>
+          }
+          <p className="text-[11px] text-gray-400 mt-1">com atraso ou sem prev.</p>
+        </div>
+
+        {/* Fornecedores */}
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500 font-medium leading-tight mb-2">Fornecedores</p>
+          {loadingItens
+            ? <div className="h-8 w-16 rounded bg-gray-200 animate-pulse" />
+            : <p className="text-2xl font-bold text-gray-700">{totalFornecedores.toLocaleString('pt-BR')}</p>
+          }
+          <p className="text-[11px] text-gray-400 mt-1">envolvidos no período</p>
+        </div>
+
+        {/* Sem previsão */}
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-xs text-gray-500 font-medium leading-tight mb-2">Sem previsão</p>
+          {loadingCards
+            ? <div className="h-8 w-16 rounded bg-gray-200 animate-pulse" />
+            : <p className="text-2xl font-bold text-amber-600">{counts?.semPrevisao?.toLocaleString('pt-BR') ?? '—'}</p>
+          }
+          <p className="text-[11px] text-gray-400 mt-1">itens sem data de entrega</p>
+        </div>
       </div>
 
-      {/* Gráfico de evolução (mockado) */}
+      {/* ── 2. Trend Chart ── */}
       <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
         <h3 className="text-sm font-semibold text-gray-700 mb-4">Evolução de Itens Faltantes — Últimos 6 Meses</h3>
         <TrendChart data={tendencia} height={200} unit="" />
@@ -1085,142 +1207,242 @@ function PcmView({ mes, ano, tendencia }: { mes: number; ano: number; tendencia:
         </div>
       )}
 
-      {/* 3 Colunas */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      {/* ── 3. Model filter chips ── */}
+      {modeloChips.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setModeloFiltro(null)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+              modeloFiltro === null
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400',
+            )}
+          >
+            Todos
+          </button>
+          {modeloChips.map(prefix => (
+            <button
+              key={prefix}
+              onClick={() => setModeloFiltro(prev => prev === prefix ? null : prefix)}
+              className={cn(
+                'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                modeloFiltro === prefix
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400',
+              )}
+            >
+              {prefix}
+            </button>
+          ))}
+        </div>
+      )}
 
-        {/* ── Chassis em risco ── */}
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">Chassis em risco</span>
-            <span className="text-sm font-bold text-red-500">
-              {loadingItens ? '…' : chassisRisco.length}
+      {/* ── 4. Status filter chips ── */}
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            { key: 'sem-previsao' as PcmCategoria, label: 'Sem previsão', dot: '#D97706', count: statusCounts.semPrevisao },
+            { key: 'atrasado'     as PcmCategoria, label: 'Atrasado',     dot: '#DC2626', count: statusCounts.atrasado },
+            { key: 'em-dia'       as PcmCategoria, label: 'Em dia',       dot: '#16A34A', count: statusCounts.emDia },
+          ] as const
+        ).map(({ key, label, dot, count }) => (
+          <button
+            key={key}
+            onClick={() => setStatusFiltro(prev => prev === key ? null : key)}
+            className={cn(
+              'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+              statusFiltro === key
+                ? 'bg-gray-900 text-white border-gray-900'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400',
+            )}
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-full shrink-0"
+              style={{ backgroundColor: dot }}
+            />
+            {label}
+            <span className={cn(
+              'ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+              statusFiltro === key ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500',
+            )}>
+              {count}
             </span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── 5. Main grid: bar chart + top fornecedores ── */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-4">
+
+        {/* LEFT — Chassis com pendências (stacked bar chart) */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Chassis com pendências</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">
+                {loadingItens ? '…' : `${chassisBarData.length} chassis`}
+              </p>
+            </div>
           </div>
-          <div className="divide-y divide-gray-50 max-h-[520px] overflow-y-auto">
+          <div className="p-4">
             {loadingItens ? (
-              <div className="p-3 space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-12 rounded-lg bg-gray-100 animate-pulse" />)}
+              <div className="space-y-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-6 rounded bg-gray-100 animate-pulse" />
+                ))}
               </div>
             ) : erroItens ? (
               <p className="py-8 text-center text-xs text-red-400">{erroItens}</p>
-            ) : chassisRisco.length === 0 ? (
-              <p className="py-8 text-center text-xs text-gray-400">Nenhum chassis em risco</p>
-            ) : chassisRisco.map(({ chassi, atrasado, semPrevisao, emDia, datafimprev }) => {
-              const total = atrasado + semPrevisao + emDia;
-              const dl = diasLabel(datafimprev);
-              const piorCategoria = atrasado > 0 ? 'atrasado' : 'sem-previsao';
-              return (
-                <div key={chassi} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{chassi || '—'}</p>
-                    {dl && <p className={cn('text-[11px] font-medium mt-0.5', dl.cls)}>{dl.label}</p>}
-                  </div>
-                  <div className="text-right shrink-0 space-y-1">
-                    <p className={cn('text-xs font-bold', atrasado > 0 ? 'text-red-500' : 'text-amber-500')}>
-                      {total} {total === 1 ? 'item' : 'itens'}
-                    </p>
-                    <span className={cn(
-                      'inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium border',
-                      piorCategoria === 'atrasado'
-                        ? 'bg-red-50 text-red-700 border-red-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    )}>
-                      {piorCategoria === 'atrasado' ? 'atrasado' : 'sem previsão'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+            ) : chassisBarData.length === 0 ? (
+              <p className="py-8 text-center text-xs text-gray-400">Nenhum chassis com pendências</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={barChartHeight}>
+                <BarChart
+                  data={chassisBarData}
+                  layout="vertical"
+                  margin={{ top: 0, right: 8, left: 0, bottom: 0 }}
+                >
+                  <XAxis type="number" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis type="category" dataKey="chassi" width={80} tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ fontSize: 11, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                    formatter={(value: number, name: string) => {
+                      const labels: Record<string, string> = { atrasado: 'Atrasado', semPrevisao: 'Sem previsão', emDia: 'Em dia' };
+                      return [value, labels[name] ?? name];
+                    }}
+                  />
+                  <Bar dataKey="atrasado"    stackId="a" fill="#DC2626" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="semPrevisao" stackId="a" fill="#D97706" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="emDia"       stackId="a" fill="#16A34A" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
-        {/* ── Top 10 produtos em falta ── */}
+        {/* RIGHT — Top Fornecedores */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Top 10 produtos em falta</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">por nº de chassis impactados</p>
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Impacto por Fornecedor</p>
+            <p className="text-[10px] text-gray-400 mt-0.5">clique para filtrar</p>
           </div>
-          <div className="p-3 space-y-3 max-h-[520px] overflow-y-auto">
+          <div className="p-3 space-y-2 max-h-72 overflow-y-auto">
             {loadingItens ? (
-              Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-10 rounded bg-gray-100 animate-pulse" />)
-            ) : erroItens ? (
-              <p className="py-8 text-center text-xs text-red-400">{erroItens}</p>
-            ) : top10Produtos.length === 0 ? (
-              <p className="py-8 text-center text-xs text-gray-400">Sem dados</p>
-            ) : (() => {
-              const maxChassis = Math.max(...top10Produtos.map(p => p.chassisSet.size), 1);
-              return top10Produtos.map((p, i) => {
-                const total = p.atrasado + p.semPrevisao + p.emDia;
-                const pct = p.chassisSet.size / maxChassis * 100;
-                const pctAt = total > 0 ? p.atrasado    / total * 100 : 0;
-                const pctSp = total > 0 ? p.semPrevisao / total * 100 : 0;
-                return (
-                  <div key={p.descrprod} className="space-y-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-start gap-2 min-w-0">
-                        <span className="shrink-0 text-[10px] font-bold text-gray-400 w-4 mt-0.5">{i + 1}.</span>
-                        <p className="text-xs text-gray-700 leading-tight line-clamp-2">{p.descrprod}</p>
-                      </div>
-                      <span className="shrink-0 text-xs font-bold text-gray-500 whitespace-nowrap">
-                        {p.chassisSet.size} <span className="font-normal text-gray-400">chassis</span>
-                      </span>
-                    </div>
-                    <div className="ml-6 h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full flex overflow-hidden" style={{ width: `${pct}%` }}>
-                        <div className="h-full bg-red-400"   style={{ width: `${pctAt}%` }} />
-                        <div className="h-full bg-amber-400" style={{ width: `${pctSp}%` }} />
-                        <div className="h-full bg-emerald-400 flex-1" />
-                      </div>
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-          </div>
-        </div>
-
-        {/* ── Top 10 fornecedores ── */}
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
-            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Top 10 fornecedores</p>
-            <p className="text-[10px] text-gray-400 mt-0.5">por itens em falta (sem previsão + atrasado)</p>
-          </div>
-          <div className="p-3 space-y-3 max-h-[520px] overflow-y-auto">
-            {loadingItens ? (
-              Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-10 rounded bg-gray-100 animate-pulse" />)
-            ) : erroItens ? (
-              <p className="py-8 text-center text-xs text-red-400">{erroItens}</p>
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-10 rounded bg-gray-100 animate-pulse" />
+              ))
             ) : top10Fornecedores.length === 0 ? (
-              <p className="py-8 text-center text-xs text-gray-400">Sem dados</p>
+              <p className="py-6 text-center text-xs text-gray-400">Sem dados</p>
             ) : (() => {
               const maxItens = Math.max(...top10Fornecedores.map(f => f.atrasado + f.semPrevisao + f.emDia), 1);
-              return top10Fornecedores.map((f, i) => {
+              return top10Fornecedores.map(f => {
                 const total = f.atrasado + f.semPrevisao + f.emDia;
                 const pct   = total / maxItens * 100;
                 const pctAt = total > 0 ? f.atrasado    / total * 100 : 0;
                 const pctSp = total > 0 ? f.semPrevisao / total * 100 : 0;
+                const isActive = fornecedorFiltro === f.nomeparc;
                 return (
-                  <div key={f.nomeparc} className="space-y-1">
+                  <button
+                    key={f.nomeparc}
+                    onClick={() => setFornecedorFiltro(prev => prev === f.nomeparc ? null : f.nomeparc)}
+                    className={cn(
+                      'w-full text-left rounded-lg border p-2 space-y-1 transition-colors',
+                      isActive
+                        ? 'bg-blue-50 border-blue-300'
+                        : 'bg-white border-gray-100 hover:border-gray-300',
+                    )}
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="shrink-0 text-[10px] font-bold text-gray-400 w-4">{i + 1}.</span>
-                        <p className="text-xs text-gray-700 truncate">{f.nomeparc}</p>
-                      </div>
+                      <p className="text-xs text-gray-700 truncate">{f.nomeparc}</p>
                       <span className="shrink-0 text-xs font-bold text-gray-500 whitespace-nowrap">
-                        {total} <span className="font-normal text-gray-400">itens</span>
+                        {total}
                       </span>
                     </div>
-                    <div className="ml-6 h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                       <div className="h-full rounded-full flex overflow-hidden" style={{ width: `${pct}%` }}>
-                        <div className="h-full bg-red-400"   style={{ width: `${pctAt}%` }} />
-                        <div className="h-full bg-amber-400" style={{ width: `${pctSp}%` }} />
+                        <div className="h-full bg-red-400"    style={{ width: `${pctAt}%` }} />
+                        <div className="h-full bg-amber-400"  style={{ width: `${pctSp}%` }} />
                         <div className="h-full bg-emerald-400 flex-1" />
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               });
             })()}
+          </div>
+        </div>
+      </div>
+
+      {/* ── 6. Grouped status table (3 columns) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Sem Previsão */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className={cn('flex items-center justify-between px-4 py-3 border-b', PCM_CAT_CFG['sem-previsao'].colHeader)}>
+            <span className="text-xs font-bold uppercase tracking-wide">Sem Previsão</span>
+            <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold border', PCM_CAT_CFG['sem-previsao'].badgeCls)}>
+              {loadingItens ? '…' : itensPorStatus.semPrevisao.length}
+            </span>
+          </div>
+          <div className="p-3 space-y-2 max-h-80 overflow-y-auto">
+            {loadingItens ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+              ))
+            ) : itensPorStatus.semPrevisao.length === 0 ? (
+              <p className="py-6 text-center text-xs text-gray-400">Nenhum item</p>
+            ) : (
+              itensPorStatus.semPrevisao.map((it, i) => (
+                <PcmItemCard key={`${it.descrprod}-${it.chassi}-${i}`} item={it} />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Atrasado */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className={cn('flex items-center justify-between px-4 py-3 border-b', PCM_CAT_CFG['atrasado'].colHeader)}>
+            <span className="text-xs font-bold uppercase tracking-wide">Atrasado</span>
+            <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold border', PCM_CAT_CFG['atrasado'].badgeCls)}>
+              {loadingItens ? '…' : itensPorStatus.atrasado.length}
+            </span>
+          </div>
+          <div className="p-3 space-y-2 max-h-80 overflow-y-auto">
+            {loadingItens ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+              ))
+            ) : itensPorStatus.atrasado.length === 0 ? (
+              <p className="py-6 text-center text-xs text-gray-400">Nenhum item</p>
+            ) : (
+              itensPorStatus.atrasado.map((it, i) => (
+                <PcmItemCard key={`${it.descrprod}-${it.chassi}-${i}`} item={it} />
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Em Dia */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+          <div className={cn('flex items-center justify-between px-4 py-3 border-b', PCM_CAT_CFG['em-dia'].colHeader)}>
+            <span className="text-xs font-bold uppercase tracking-wide">Em Dia</span>
+            <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold border', PCM_CAT_CFG['em-dia'].badgeCls)}>
+              {loadingItens ? '…' : itensPorStatus.emDia.length}
+            </span>
+          </div>
+          <div className="p-3 space-y-2 max-h-80 overflow-y-auto">
+            {loadingItens ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-20 rounded-lg bg-gray-100 animate-pulse" />
+              ))
+            ) : itensPorStatus.emDia.length === 0 ? (
+              <p className="py-6 text-center text-xs text-gray-400">Nenhum item</p>
+            ) : (
+              itensPorStatus.emDia.map((it, i) => (
+                <PcmItemCard key={`${it.descrprod}-${it.chassi}-${i}`} item={it} />
+              ))
+            )}
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { LayoutGrid, Table2, Target } from 'lucide-react';
+import { LayoutGrid, Table2, Target, Activity } from 'lucide-react';
 import { BscTable } from '@/components/BscTable';
 import { DashboardCards } from '@/components/DashboardCards';
 import { getIndicadores } from '@/services/indicadoresService';
@@ -8,6 +8,7 @@ import { calcPctAtingimento, statusBscFromPct } from '@/types';
 import type { Indicador } from '@/types';
 import { fmtMesFull } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
+import { OpeDetalhamentoModal } from '@/pages/OpeDetalhamentoModal';
 
 type OutletCtx = { mes: number; ano: number };
 type ViewMode = 'cards' | 'tabela';
@@ -19,16 +20,30 @@ const STATUS_COLOR = {
   'critico':  'bg-red-50 text-red-700 border-red-200',
 };
 
+const OPE_META = 85;
+
+function opeStatusCfg(valor: number) {
+  if (valor >= OPE_META)      return { label: 'No Prazo',  bar: 'bg-emerald-500', text: 'text-emerald-700', badge: 'bg-emerald-50 border-emerald-200 text-emerald-700' };
+  if (valor >= OPE_META - 10) return { label: 'Atenção',   bar: 'bg-amber-500',   text: 'text-amber-700',   badge: 'bg-amber-50 border-amber-200 text-amber-700' };
+  return                             { label: 'Crítico',   bar: 'bg-red-500',     text: 'text-red-700',     badge: 'bg-red-50 border-red-200 text-red-700' };
+}
+
 export default function DashboardPage() {
   const { mes, ano } = useOutletContext<OutletCtx>();
   const [indicadores, setIndicadores] = useState<Indicador[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     return (localStorage.getItem('dashboard-view') as ViewMode) ?? 'cards';
   });
+  const [opeOpen, setOpeOpen] = useState(false);
 
   useEffect(() => {
     getIndicadores(mes, ano).then(setIndicadores);
   }, [mes, ano]);
+
+  const opeMetrica = indicadores
+    .find(i => i.id === 'producao')
+    ?.metricas.find(m => m.id === 'ope');
+  const opeValor = typeof opeMetrica?.valor === 'number' ? opeMetrica.valor : null;
 
   const handleView = (v: ViewMode) => {
     setViewMode(v);
@@ -108,6 +123,48 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Widget OPE */}
+      {opeValor !== null && (() => {
+        const cfg = opeStatusCfg(opeValor);
+        const pct = Math.min((opeValor / OPE_META) * 100, 100);
+        return (
+          <div className="rounded-xl border border-indigo-100 bg-white shadow-sm p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600">
+                <Activity className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">OPE — Operacional de Produção</p>
+                <p className="text-xs text-gray-400">{fmtMesFull(mes)} / {ano}</p>
+              </div>
+            </div>
+
+            <div className="flex-1 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-2xl font-bold text-gray-900">{opeValor.toFixed(1)}%</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">Meta: {OPE_META}%</span>
+                  <span className={cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', cfg.badge)}>
+                    {cfg.label}
+                  </span>
+                </div>
+              </div>
+              <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden">
+                <div className={cn('h-full rounded-full transition-all duration-500', cfg.bar)} style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+
+            <button
+              onClick={() => setOpeOpen(true)}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 transition-colors"
+            >
+              <Activity className="h-3.5 w-3.5" />
+              Ver Detalhamento
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Conteúdo */}
       {indicadores.length === 0 ? (
         <div className="flex items-center justify-center h-48">
@@ -118,6 +175,8 @@ export default function DashboardPage() {
       ) : (
         <BscTable indicadores={indicadores} mes={mes} ano={ano} />
       )}
+
+      {opeOpen && <OpeDetalhamentoModal onClose={() => setOpeOpen(false)} />}
     </div>
   );
 }

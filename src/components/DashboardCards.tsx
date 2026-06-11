@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ShieldCheck, Award, DollarSign, Factory,
-  Layers, Package, BarChart3, Globe, ChevronRight,
+  Layers, Package, BarChart3, Globe, ChevronRight, Activity,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Indicador, Metrica } from '@/types';
 import { calcPctAtingimento, statusBscFromPct } from '@/types';
+import { OpeDetalhamentoModal } from '@/pages/OpeDetalhamentoModal';
 
 const ICONS: Record<string, React.ElementType> = {
   ShieldCheck, Award, DollarSign, Factory, Layers, Package, BarChart3, Globe,
@@ -53,7 +55,7 @@ function MiniBar({ pct, status }: { pct: number; status: keyof typeof STATUS_CFG
   );
 }
 
-function IndicadorCard({ indicador }: { indicador: Indicador }) {
+function IndicadorCard({ indicador, onOpeDetalhe }: { indicador: Indicador; onOpeDetalhe?: () => void }) {
   const nav = useNavigate();
   const Icon = ICONS[indicador.icone] ?? BarChart3;
 
@@ -136,7 +138,16 @@ function IndicadorCard({ indicador }: { indicador: Indicador }) {
       </div>
 
       {/* Footer */}
-      <div className="px-4 pb-3 flex items-center justify-end">
+      <div className="px-4 pb-3 flex items-center justify-between">
+        {onOpeDetalhe ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpeDetalhe(); }}
+            className="flex items-center gap-1 text-xs text-indigo-500 font-medium hover:text-indigo-700 transition-colors"
+          >
+            <Activity className="h-3.5 w-3.5" />
+            Detalhamento OPE
+          </button>
+        ) : <span />}
         <span className="flex items-center gap-0.5 text-xs text-blue-500 font-medium">
           Ver detalhe <ChevronRight className="h-3.5 w-3.5" />
         </span>
@@ -148,11 +159,20 @@ function IndicadorCard({ indicador }: { indicador: Indicador }) {
 type Props = { indicadores: Indicador[] };
 
 export function DashboardCards({ indicadores }: Props) {
+  const [opeOpen, setOpeOpen] = useState(false);
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-      {indicadores.map((ind) => (
-        <IndicadorCard key={ind.id} indicador={ind} />
-      ))}
-    </div>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        {indicadores.map((ind) => (
+          <IndicadorCard
+            key={ind.id}
+            indicador={ind}
+            onOpeDetalhe={ind.id === 'producao' ? () => setOpeOpen(true) : undefined}
+          />
+        ))}
+      </div>
+      {opeOpen && <OpeDetalhamentoModal onClose={() => setOpeOpen(false)} />}
+    </>
   );
 }
